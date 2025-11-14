@@ -10,23 +10,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
-from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
 
 
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
-
-# Handler pour récupérer le file_id d'une photo
-@dp.message_handler(content_types=['photo'])
-async def get_photo_file_id(message: types.Message):
-    file_id = message.photo[-1].file_id  # on prend la meilleure résolution
-    await message.reply(f"📸 File ID de cette photo :\n{file_id}")
-
-# Handler pour récupérer le file_id d'une vidéo
-@dp.message_handler(content_types=['video'])
-async def get_video_file_id(message: types.Message):
-    file_id = message.video.file_id
-    await message.reply(f"🎬 File ID de cette vidéo :\n{file_id}")
 
 # Dictionnaire temporaire pour stocker les derniers messages de chaque client
 last_messages = {}
@@ -44,7 +31,7 @@ admin_modes = {}  # Clé = admin_id, Valeur = "en_attente_message"
 
 # Mapping entre ID Telegram des admins et leur email dans Airtable 19juillet 2025 debut
 ADMIN_EMAILS = {
-    7334072965: "correadosanjosn@gmail.com",
+    7334072965: "vinteo.ac@gmail.com",
 }
 # Mapping entre ID Telegram des admins et leur email dans Airtable 19juillet 2025 fin
 
@@ -371,7 +358,7 @@ prix_list = [1, 3, 9, 14, 19, 24, 29, 34, 39, 44, 49, 59, 69, 79, 89, 99]
 WHITELIST_LINKS = [
     "https://novapulseonline.wixsite.com/",
     "https://buy.stripe.com/",
-    "https://t.me/mini_jessie_bot?start=cdan" # 22 Rajouter à la ligne en bas le lien propre de l'admin
+    "https://t.me/NovaPulsetestbot?start=cdan" # 22 Rajouter à la ligne en bas le lien propre de l'admin
 ]
 
 def lien_non_autorise(text):
@@ -404,7 +391,7 @@ async def verifier_les_liens_uniquement(message: types.Message):
 
 # Fonction pour ajouter un paiement à Airtable 22 Changer l'adresse mail par celui de l'admin
 
-def log_to_airtable(pseudo, user_id, type_acces, montant, contenu="Paiement Telegram", email="correadosanjosn@gmail.com",):
+def log_to_airtable(pseudo, user_id, type_acces, montant, contenu="Paiement Telegram", email="vinteo.ac@gmail.com",):
     if not type_acces:
         type_acces = "Paiement"  # Par défaut pour éviter erreurs
 
