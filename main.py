@@ -1,23 +1,45 @@
-# main.py
-import os
 from fastapi import FastAPI, Request
-from aiogram import types
+from aiogram import Bot, Dispatcher, types
+import os
+from dotenv import load_dotenv
+from core import bot, dp
+import bott_webhook
+from stripe_webhook import router as stripe_router
 
-from core import bot, dp, BOT_TOKEN
-from stripe_webhook import router as stripe_router  # tu peux le brancher plus tard
+
+
+
+
+load_dotenv()
+
 
 app = FastAPI()
 
-# si tu veux, tu peux commenter cette ligne au tout début
-# app.include_router(stripe_router)
-
-@app.get("/")
-async def root():
-    return {"status": "ok", "message": "NovaPulse TEST bot running"}
-
-@app.post(f"/bot{BOT_TOKEN}")
+@app.post(f"/bot/{os.getenv('BOT_TOKEN')}")
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = types.Update(**data)
-    await dp.process_update(update)
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.process_update(update)
+    except Exception as e:
+        print("Erreur dans webhook :", e)
+        return {"ok": False, "error": str(e)}
     return {"ok": True}
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        import bott_webhook
+        bott_webhook.initialize_authorized_users()
+        print(f"[STARTUP] Initialisation des utilisateurs VIP terminée.")
+    except Exception as e:
+        print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
+
+# === 221097 DEBUT
+app.include_router(stripe_router)
+# === 221097 FIN
+
+print("🔥 >>> FICHIER MAIN.PY BIEN LANCÉ <<< 🔥")
+
+# === 221097 FINV1
