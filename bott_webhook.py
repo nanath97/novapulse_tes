@@ -1,6 +1,15 @@
 # bott_webhook.py
 from aiogram import types
 from core import dp, bot
+from collections import defaultdict
+
+
+
+
+# Paiements validés par Stripe, stockés temporairement
+# ex : {14: [datetime1, datetime2]}
+paiements_recents = defaultdict(list)
+
 
 ADMIN_ID = 7334072965  # toi
 
