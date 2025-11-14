@@ -8,7 +8,7 @@ from ban_storage import ban_list  # Import de la ban_list
 import asyncio
 import time  # pour la fenêtre glissante
 
-ADMIN_ID = 7334072965  # Ton ID Telegram admin
+ADMIN_ID = 1788641757  # Ton ID Telegram admin celui du client
 
 BOUTONS_AUTORISES = [
     "🔞 Voir le contenu du jour... tout en jouant 🎰",
@@ -22,7 +22,7 @@ SHOW_REMAINING_HINT = True                   # afficher "X/5 utilisés" au fil d
 free_msgs_state = {}                         # user_id -> {"count": int, "window_start": float, "last": float}
 
 # Lien VIP (existant)
-VIP_URL = "https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G"
+VIP_URL = "https://buy.stripe.com/5kQ9AS60J2ET9wxfi57AI0W"
 
 # ===== Anti-doublon par message =====
 # clé = (chat_id, message_id) → timestamp
@@ -44,7 +44,7 @@ async def send_nonvip_reply_after_delay(bot, chat_id: int, user_id: int, authori
         chat_id=chat_id,
         text=(
             "Ravi de te rencontrer mon coeur 💕,\n\nJe voudrais tellement te montrer plus 🔞 mais tu dois être un VIP !\n\n"
-            "En plus pour 9 €, tu auras droit à\n- l'accès VIP à vie ⚡\n- 2 nudes sexy 🔞 \n- 1 video de ma petite chatte qui mouille 💦\nJe t'attends ....🤭\n\n"
+            "En plus pour 1 €, tu auras droit à\n- l'accès VIP à vie ⚡\n- 2 nudes sexy 🔞 \n- 1 video de ma petite chatte qui mouille 💦\nJe t'attends ....🤭\n\n"
             "<i>🔐 Paiement sécurisé via Stripe</i>\n\n"
             f"{VIP_URL} \n\n"
         ),
@@ -75,10 +75,6 @@ async def send_nonvip_second_reply_after_delay(bot, chat_id: int, user_id: int, 
 # Helper facultatif : à appeler quand un user devient VIP pour nettoyer son compteur
 def reset_free_quota(user_id: int):
     free_msgs_state.pop(user_id, None)
-
-# ===== NEW: Anti-spam d'avertissement pour médias non-VIP =====
-_last_media_warn = {}         # user_id -> timestamp du dernier avertissement
-_MEDIA_WARN_COOLDOWN = 30     # secondes entre deux avertissements au même user
 
 
 class PaymentFilterMiddleware(BaseMiddleware):
@@ -111,31 +107,8 @@ class PaymentFilterMiddleware(BaseMiddleware):
                     print(f"Erreur envoi message banni : {e}")
                 raise CancelHandler()
 
-        # ===== NEW: Garde-fou médias pour NON-VIP =====
-        # Si NON-VIP et message ≠ TEXTE → on supprime, on avertit, et on NE consomme PAS le quota.
+        # Ne gérer que du texte
         if message.content_type != types.ContentType.TEXT:
-            if user_id not in self.authorized_users:
-                try:
-                    await message.delete()
-                except Exception as e:
-                    print(f"[MEDIA BLOCK] Erreur suppression: {e}")
-
-                last = _last_media_warn.get(user_id, 0)
-                if now - last > _MEDIA_WARN_COOLDOWN:
-                    _last_media_warn[user_id] = now
-                    kb = InlineKeyboardMarkup().add(
-                        InlineKeyboardButton("💎 Deviens VIP", url=VIP_URL)
-                    )
-                    await message.bot.send_message(
-                        chat_id=message.chat.id,
-                        text=("⚠️ L’envoi d’images/vidéos/documents est réservé aux membres VIP.\n"
-                              "Tu peux écrire 5 messages texte gratuitement, puis passer en VIP pour tout débloquer."),
-                        reply_markup=kb
-                    )
-                # Stopper ici : aucun handler en aval, aucun décrément du quota
-                raise CancelHandler()
-
-            # Si VIP et message ≠ texte → laisser continuer les handlers médias
             return
 
         # ✅ Admin : juste filtrage des liens
