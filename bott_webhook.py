@@ -672,19 +672,6 @@ async def handle_start(message: types.Message):
     if param == "vipcdan":
         authorized_users.add(user_id)
         reset_free_quota(user_id)
-# Créer le topic staff pour ce VIP
-    try:
-        if STAFF_FEATURE_ENABLED:
-            await staff_system.ensure_topic_for(
-                bot,
-                user_id=user_id,
-                username=message.from_user.username or message.from_user.first_name,
-                email="",
-                total_spent=0.0
-            )
-    except Exception as e:
-        print(f"[staff] Erreur creation topic dans /start : {e}")
-
 
         await bot.send_message(
             user_id,
