@@ -17,6 +17,8 @@ from vip_topics import ensure_topic_for_vip, is_vip, get_user_id_by_topic_id
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
 
+# map (chat_id, message_id) -> chat_id du client
+pending_replies = {}
 
 
 # Dictionnaire temporaire pour stocker les derniers messages de chaque client
@@ -884,9 +886,15 @@ from ban_storage import ban_list  # à ajouter tout en haut si pas déjà fait
 
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-@dp.message_handler(lambda message: message.from_user.id != ADMIN_ID, content_types=types.ContentType.ANY)
+@dp.message_handler(
+    lambda message: message.chat.type == "private" and message.from_user.id != ADMIN_ID,
+    content_types=types.ContentType.ANY
+)
 async def relay_from_client(message: types.Message):
     user_id = message.from_user.id
+
+    # 🔍 Debug rapide
+    print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
 
     # 🔒 1) Vérifier si le client est banni par un admin
     for admin_id, clients_bannis in ban_list.items():
@@ -900,9 +908,6 @@ async def relay_from_client(message: types.Message):
             except Exception:
                 pass
             return  # ⛔ STOP : on n'envoie rien à l'admin
-
-    # 🔍 Debug rapide pour les logs
-    print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
 
     # 🔹 2) CAS NON-VIP → DM admin (comportement historique)
     if user_id not in authorized_users:
@@ -932,6 +937,7 @@ async def relay_from_client(message: types.Message):
         print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
 
 # STAFF FIN 
 
