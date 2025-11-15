@@ -31,6 +31,11 @@ def load_vip_topics():
     except Exception as e:
         _vip_topics = {}
         print(f"[VIP_TOPICS] Erreur chargement : {e}")
+        
+def is_vip(user_id: int) -> bool:
+    """Retourne True si ce user a déjà un topic VIP associé."""
+    uid = str(user_id)
+    return uid in _vip_topics
 
 
 def save_vip_topics():

@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
-from vip_topics import ensure_topic_for_vip
+from vip_topics import ensure_topic_for_vip, is_vip, get_user_id_by_topic_id
+
 
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
@@ -954,38 +955,36 @@ async def relay_from_client(message: types.Message):
                 pass
             return  # ⛔ STOP : on n'envoie rien à l'admin
 
-    # 🔹 2) CAS NON-VIP → COMPORTEMENT ACTUEL : DM vers ADMIN_ID
-    if user_id not in authorized_users:
+
+        # 🔹 2) CAS NON-VIP au sens "pas encore de topic VIP"
+    if not is_vip(user_id):
         try:
             sent_msg = await bot.forward_message(
                 chat_id=ADMIN_ID,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
-            # on garde exactement le même mécanisme pending_replies
             pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
             print(f"✅ Message NON-VIP reçu de {message.chat.id} et transféré à l'admin")
         except Exception as e:
             print(f"❌ Erreur transfert message client NON-VIP : {e}")
         return
 
-    # 🔹 3) CAS VIP → on envoie dans le TOPIC du supergroupe staff
+    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
     try:
-        # crée / récupère le topic VIP pour ce client
-        topic_id = await ensure_topic_for_vip(message.from_user)
+        topic_id = await ensure_topic_for_vip(message.from_user)  # récupère le même topic_id
 
         sent_msg = await bot.forward_message(
             chat_id=STAFF_GROUP_ID,
             from_chat_id=message.chat.id,
             message_id=message.message_id,
-            message_thread_id=topic_id  # 🔥 c'est ça qui l'envoie dans SON topic
+            message_thread_id=topic_id
         )
-
-        # même logique que d'habitude : on mappe le message forwardé → client
         pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
         print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
 
 # STAFF FIN 
 
@@ -1024,23 +1023,32 @@ async def handle_admin_message(message: types.Message):
         await traiter_message_payant_groupé(message)
         return
 
-    # 3) SINON → c'est le comportement normal (réponse privée à un client)
-    if not message.reply_to_message:
-        # ici seulement on exige le reply
-        print("❌ Pas de reply détecté (et pas en mode groupé)")
-        return
+    
+    # 3) SINON → c'est le comportement normal (réponse à un client)
+    #    Cas 1 : on répond à un message forwardé (comme avant)
+    #    Cas 2 : on parle dans un topic sans reply → on retrouve le client avec le topic_id
 
-    # 🔍 Identification du destinataire pour le mode normal
-    if message.reply_to_message.forward_from:
-        user_id = message.reply_to_message.forward_from.id
+    user_id = None
+
+    if message.reply_to_message:
+        # 🔍 Ancien comportement : on se base sur le forward ou pending_replies
+        if message.reply_to_message.forward_from:
+            user_id = message.reply_to_message.forward_from.id
+        else:
+            user_id = pending_replies.get((message.chat.id, message.reply_to_message.message_id))
     else:
-        user_id = pending_replies.get((message.chat.id, message.reply_to_message.message_id))
+        # Pas de reply → si on est dans le supergroupe staff, on utilise le topic_id
+        if message.chat.id == STAFF_GROUP_ID and message.message_thread_id is not None:
+            user_id = get_user_id_by_topic_id(message.message_thread_id)
+        else:
+            print("❌ Pas de reply détecté (et pas dans un topic staff connu)")
+            return
 
     if not user_id:
         await bot.send_message(chat_id=ADMIN_ID, text="❗Impossible d'identifier le destinataire.")
         return
 
-    # ✅ Envoi normal
+    # ✅ Envoi normal (comme avant)
     try:
         if message.text:
             await bot.send_message(chat_id=user_id, text=message.text)
@@ -1058,6 +1066,7 @@ async def handle_admin_message(message: types.Message):
             await bot.send_message(chat_id=ADMIN_ID, text="📂 Type de message non supporté.")
     except Exception as e:
         await bot.send_message(chat_id=ADMIN_ID, text=f"❗Erreur admin -> client : {e}")
+
 
 
 # ========== CHOIX DANS LE MENU INLINE ==========
