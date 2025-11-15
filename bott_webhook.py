@@ -16,19 +16,6 @@ from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
 
-# Handler pour récupérer le file_id d'une photo
-@dp.message_handler(content_types=['photo'])
-async def get_photo_file_id(message: types.Message):
-    file_id = message.photo[-1].file_id  # on prend la meilleure résolution
-    await message.reply(f"📸 File ID de cette photo :\n{file_id}")
-
-# Handler pour récupérer le file_id d'une vidéo
-@dp.message_handler(content_types=['video'])
-async def get_video_file_id(message: types.Message):
-    file_id = message.video.file_id
-    await message.reply(f"🎬 File ID de cette vidéo :\n{file_id}")
-
-
 
 
 # Dictionnaire temporaire pour stocker les derniers messages de chaque client
@@ -38,7 +25,7 @@ authorized_admin_ids = [ADMIN_ID]
 
 # Constantes pour le bouton VIP et la vidéo de bienvenue (défaut)
 VIP_URL = "https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G"
-WELCOME_VIDEO_FILE_ID = "BAACAgQAAxkBAAJ94mkItI9fuZ9rKDxry1Ou0Gr53q0QAAL_GwACx-RIUIFWcMIrUxGqNgQ"
+WELCOME_VIDEO_FILE_ID = "BAACAgEAAxkBAAMzaRe_FXGFxa985em5FslgcyIeRa0AAmUHAAJVArlE6gHI1Lq6DdE2BA"
 
 
 
@@ -77,7 +64,7 @@ liens_paiement = {
 
 
 # 1.=== Variables globales ===
-DEFAULT_FLOU_IMAGE_FILE_ID = "AgACAgEAAxkBAAIOgWgSLV1I3pOt7vxnpci_ba-hb9UXAAK6rjEbM2KQRDdrQA-mqmNwAQADAgADeAADNgQ" # Remplace par le vrai file_id Telegram
+DEFAULT_FLOU_IMAGE_FILE_ID = "AgACAgEAAxkBAAMlaRe8XkiqsFX0iy0McYOjCtmGdvQAAoELaxtVArlE_4hgbgpoyOsBAAMCAAN4AAM2BA" # Remplace par le vrai file_id Telegram
 
 
 # Fonction de détection de lien non autorisé
@@ -682,11 +669,11 @@ async def handle_start(message: types.Message):
         )
 
         # 2 photos VIP
-        await bot.send_photo(chat_id=user_id, photo="AgACAgQAAxkBAAJoVGjQEl41mcOenWoUHd0wBApWeIgAA43KMRtXEIBSXkjHysPuAYMBAAMCAAN4AAM2BA")
-        await bot.send_photo(chat_id=user_id, photo="AgACAgQAAxkBAAJoVWjQEl4aYR_CKOnekikxufzd6PHlAAKOyjEbVxCAUvKJA0Awx7TdAQADAgADeAADNgQ")
+        await bot.send_photo(chat_id=user_id, photo="AgACAgEAAxkBAAMxaRe_BtBD6d7hdvclCBxBSIPeRtYAAoULaxtVArlEyuuNXhy3_pgBAAMCAAN4AAM2BA")
+        await bot.send_photo(chat_id=user_id, photo="AgACAgEAAxkBAAMvaRe_AyWrpdwMVHguMI4Qy03mIt8AAgELaxv7zcBEf0CJnOTUnLUBAAMCAAN5AAM2BA")
 
         # 1 vidéo VIP
-        await bot.send_video(chat_id=user_id, video="BAACAgQAAxkBAAJoWGjQEoDBkbxuCtL-jigfwNWNtEGBAAIDHQACVxCAUsgVHeltOHHgNgQ")
+        await bot.send_video(chat_id=user_id, video="BAACAgEAAxkBAAMzaRe_FXGFxa985em5FslgcyIeRa0AAmUHAAJVArlE6gHI1Lq6DdE2BA")
 
         # Logs
         await bot.send_message(ADMIN_ID, f"🌟 Nouveau VIP : {message.from_user.username or message.from_user.first_name}.")
