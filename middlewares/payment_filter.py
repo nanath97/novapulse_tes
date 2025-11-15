@@ -56,6 +56,10 @@ class PaymentFilterMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
         user_id = message.from_user.id
         chat = message.chat
+        print(
+             f"[PAYMENT_MW] from user_id={user_id}, chat_id={chat.id}, "
+            f"ADMIN_ID={ADMIN_ID}, DIRECTEUR_ID={DIRECTEUR_ID}"
+)
 
         # 0) Le filtre "5 messages" ne s'applique QUE dans les MP client ↔ bot
         #    → groupes / supergroupes / topics = ignorés
