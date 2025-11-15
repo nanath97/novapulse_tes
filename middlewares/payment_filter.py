@@ -27,8 +27,7 @@ EXCLUDED_IDS = {
 
 # Boutons de ton ReplyKeyboard qui NE doivent PAS être comptés comme messages gratuits
 BOUTONS_AUTORISES = [
-    "🔞 Voir le contenu du jour... tout en jouant 🎰",
-    "✨Discuter en tant que VIP",
+    "🔞 Voir le contenu du jour... tout en jouant 🎰"
 ]
 
 # ===== Paramètres "messages gratuits" =====

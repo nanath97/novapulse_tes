@@ -251,112 +251,6 @@ async def handle_nath_global_stats(message: types.Message):
 # FIN de la fonction du propriétaire
 
 
-
-
-# Liste des clients bannis par admin
-@dp.message_handler(commands=['supp'])
-async def bannir_client(message: types.Message):
-    if not message.reply_to_message:
-        await message.reply("❌ Utilisez cette commande en réponse au message du client à retirer.")
-        return
-
-    user_id = None
-    if message.reply_to_message.forward_from:
-        user_id = message.reply_to_message.forward_from.id
-    else:
-        user_id = pending_replies.get((message.chat.id, message.reply_to_message.message_id))
-
-    if not user_id:
-        await message.reply("❌ Impossible d’identifier le client. Réponds bien à un message transféré par le bot.")
-        return
-
-    admin_id = message.from_user.id
-
-    if admin_id not in ban_list:
-        ban_list[admin_id] = []
-
-    if user_id not in ban_list[admin_id]:
-        ban_list[admin_id].append(user_id)
-
-        await message.reply("✅ Le client a été retiré avec succès.")
-        try:
-            await bot.send_message(user_id, "❌ Sorry, but you have been removed from the VIP group.")
-        except Exception as e:
-            print(f"Erreur lors de l'envoi du message au client banni : {e}")
-            await message.reply("ℹ️ Le client est bien banni, mais je n’ai pas pu lui envoyer le message (permissions Telegram).")
-    else:
-        await message.reply("ℹ️ Ce client est déjà retiré.")
-
-
-@dp.message_handler(commands=['unsupp'])
-async def reintegrer_client(message: types.Message):
-    if not message.reply_to_message:
-        await message.reply("❌ Utilisez cette commande en réponse au message du client à réintégrer.")
-        return
-
-    user_id = None
-    if message.reply_to_message.forward_from:
-        user_id = message.reply_to_message.forward_from.id
-    else:
-        user_id = pending_replies.get((message.chat.id, message.reply_to_message.message_id))
-
-    if not user_id:
-        await message.reply("❌ Impossible d’identifier le client. Réponds bien à un message transféré par le bot.")
-        return
-
-    admin_id = message.from_user.id
-
-    if admin_id in ban_list and user_id in ban_list[admin_id]:
-        ban_list[admin_id].remove(user_id)
-
-        await message.reply("✅ Le client a été réintégré avec succès.")
-        try:
-            await bot.send_message(user_id, "✅ You have been reinstated to the VIP group !")
-        except Exception as e:
-            print(f"Erreur lors de l'envoi du message au client réintégré : {e}")
-            await message.reply("ℹ️ Réintégré, mais le message n’a pas pu être envoyé (permissions Telegram).")
-
-    else:
-        await message.reply("ℹ️ Ce client n’était pas retiré.")
-
-# Mise sous forme de boutons : bannissement
-
-@dp.message_handler(lambda message: message.text == "❌ Bannir le client" and message.reply_to_message and message.from_user.id == ADMIN_ID)
-async def bouton_bannir(message: types.Message):
-    forwarded = message.reply_to_message.forward_from
-    if not forwarded:
-        await message.reply("❌ Tu dois répondre à un message transféré du client.")
-        return
-
-    user_id = forwarded.id
-    ban_list.setdefault(message.from_user.id, set()).add(user_id)
-    await message.reply(f"🚫 Le client a été banni avec succès.")
-    try:
-        await bot.send_message(user_id, "❌ You have been removed. You can no longer contact me.")
-    except Exception as e:
-        print(f"Erreur d'envoi au client banni : {e}")
-        await message.reply("ℹ️ Le client est banni, mais je n’ai pas pu lui envoyer le message.")
-
-
-@dp.message_handler(lambda message: message.text == "✅ Réintégrer le client" and message.reply_to_message and message.from_user.id == ADMIN_ID)
-async def bouton_reintegrer(message: types.Message):
-    forwarded = message.reply_to_message.forward_from
-    if not forwarded:
-        await message.reply("❌ Tu dois répondre à un message transféré du client.")
-        return
-
-    user_id = forwarded.id
-    if user_id in ban_list.get(message.from_user.id, set()):
-        ban_list[message.from_user.id].remove(user_id)
-        await message.reply(f"✅ Le client a été réintégré.")
-        try:
-            await bot.send_message(user_id, "✅ You have been reinstated, you can contact me again.")
-        except Exception as e:
-            print(f"Erreur d'envoi au client réintégré : {e}")
-            await message.reply("ℹ️ Réintégré, mais je n’ai pas pu lui envoyer le message.")
-    else:
-        await message.reply("ℹ️ Ce client n’était pas retiré.")
-
 # Liste des prix autorisés
 prix_list = [1, 3, 9, 14, 19, 24, 29, 34, 39, 44, 49, 59, 69, 79, 89, 99]
 
@@ -444,10 +338,7 @@ keyboard_admin.add(
     types.KeyboardButton("📖 Commandes"),
     types.KeyboardButton("📊 Statistiques")
 )
-keyboard_admin.add(# TEST bouton admin
-    types.KeyboardButton("❌ Bannir le client"),
-    types.KeyboardButton("✅ Réintégrer le client")
-)
+
 keyboard_admin.add(
     types.KeyboardButton("✉️ Message à tous les VIPs")
 )
@@ -594,10 +485,6 @@ async def lancer_roulette(cb: types.CallbackQuery):
     # Fermer le spinner du bouton inline côté client
     await cb.answer()
 
-
-
-
-#fin de l'envoi du bouton du contenu du jour
 
 
 
