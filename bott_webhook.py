@@ -923,20 +923,30 @@ async def relay_from_client(message: types.Message):
             print(f"❌ Erreur transfert message client NON-VIP : {e}")
         return
 
-    # 🔹 3) CAS VIP → routage vers le topic du staff
+    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
     try:
         topic_id = await ensure_topic_for_vip(message.from_user)  # crée ou récupère le topic VIP
 
-        sent_msg = await bot.forward_message(
-            chat_id=STAFF_GROUP_ID,
-            from_chat_id=message.chat.id,
-            message_id=message.message_id,
-            message_thread_id=topic_id
+        # On utilise l'API brute Telegram pour profiter de message_thread_id
+        res = await bot.request(
+            "forwardMessage",
+            {
+                "chat_id": STAFF_GROUP_ID,
+                "from_chat_id": message.chat.id,
+                "message_id": message.message_id,
+                "message_thread_id": topic_id,
+            }
         )
-        pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
+
+        # res est un dict de Message → on récupère message_id pour pending_replies
+        sent_msg_id = res.get("message_id")
+        if sent_msg_id:
+            pending_replies[(STAFF_GROUP_ID, sent_msg_id)] = message.chat.id
+
         print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
 
 
 # STAFF FIN 
