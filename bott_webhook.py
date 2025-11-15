@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
-
+from vip_topics import ensure_topic_for_vip
 
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
@@ -663,6 +663,13 @@ async def handle_start(message: types.Message):
         authorized_users.add(user_id)
         reset_free_quota(user_id)
 
+
+# 🔹 création / récupération du topic VIP pour ce client STAFF FIN 
+        topic_id = await ensure_topic_for_vip(message.from_user)
+
+# 🔹 création / récupération du topic VIP pour ce client STAFF FIN
+
+
         await bot.send_message(
             user_id,
             "✨ Bienvenue dans le VIP mon coeur 💕! Et voici ton cadeau 🎁:"
@@ -712,44 +719,6 @@ async def handle_start(message: types.Message):
         video=WELCOME_VIDEO_FILE_ID,
         reply_markup=vip_kb
     )
-
-
-
- # TEST
-@dp.message_handler(lambda message: message.text == "❗ Problème d'achat")
-async def probleme_achat(message: types.Message):
-    texte_client = (
-        "❗ *Un problème avec ton achat ?*\n\n"
-        "Pas de panique ! Je traite chaque cas avec le plus grand sérieux. "
-        "Tu peux m'écrire à *novapulse.online@gmail.com* avec ton nom de telegram, "
-        "et je vais traiter ta demande maintenant !\n\n"
-        "_Je m'en charge._"
-    )
-    await bot.send_message(message.chat.id, texte_client, parse_mode="Markdown")
-
-    pseudo = message.from_user.username or message.from_user.first_name or "Inconnu"
-    user_id = message.from_user.id
-
-    # 🔔 Alerte pour le vendeur (admin)
-    await bot.send_message(ADMIN_ID,
-        f"⚠️ *ALERTE LITIGE CLIENT* :\n\n"
-        f"Le client {pseudo} (ID: {user_id}) a cliqué sur *'Problème achat'*.\n"
-        f"Pense à vérifier si tout est OK.",
-        parse_mode="Markdown"
-    )
-
-    # 🔔 Alerte pour le directeur
-    await bot.send_message(DIRECTEUR_ID,
-        f"🔔 *Problème achat détecté*\n\n"
-        f"👤 Client : {pseudo} (ID: {user_id})\n"
-        f"👨‍💼 Admin concerné : {ADMIN_ID}",
-        parse_mode="Markdown"
-    )
-
-    print(f"✅ Alertes envoyées à ADMIN_ID ({ADMIN_ID}) et DIRECTEUR_ID ({DIRECTEUR_ID})")
-
-# TEST FIN
-
 
     # Envoi à l'admin (vendeur)
     try:
@@ -953,59 +922,6 @@ async def handle_admin_message(message: types.Message):
         print(f"❌ Erreur suppression message : {e}")
 
 
-# Handler bouton Prendre en charge
-@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
-async def prendre_en_charge(call: types.CallbackQuery):
-    user_id = int(call.data.split("_")[1])
-    nom_admin = call.from_user.first_name or f"Admin {call.from_user.id}"
-    
-    assignations[user_id] = nom_admin
-    await call.message.answer(f"✅ {nom_admin} est maintenant en charge du client {user_id}.")
-
-    # Supprimer confirmation après 10s
-    await asyncio.sleep(10)
-    try:
-        await bot.delete_message(chat_id=ADMIN_ID, message_id=call.message.message_id + 1)
-    except:
-        pass
-
-
-# Handler bouton Annoter
-@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
-async def annoter_client(call: types.CallbackQuery):
-    user_id = int(call.data.split("_")[1])
-    await call.message.answer(f"✍️ Écris la note pour ce client (ID: {user_id}).")
-    
-    admin_modes["annoter"] = user_id
-
-
-# Handler pour réception de la note
-@dp.message_handler(lambda message: ADMIN_ID == message.from_user.id and admin_modes.get("annoter"))
-async def enregistrer_annotation(message: types.Message):
-    user_id_cible = admin_modes.pop("annoter")
-    
-    ancienne_note = annotations.get(user_id_cible, "")
-    nouvelle_note = message.text.strip()
-    
-    nouvelle_ligne = f"- {nouvelle_note}"
-
-    if ancienne_note != "Aucune note" and ancienne_note:
-        annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
-    else:
-        annotations[user_id_cible] = nouvelle_ligne
-
-    confirmation_msg = await message.answer(
-        f"✅ Note ajoutée pour le client {user_id_cible}.\n📒 Notes actuelles :\n{annotations[user_id_cible]}"
-    )
-
-    await asyncio.sleep(10)
-    try:
-        await bot.delete_message(chat_id=ADMIN_ID, message_id=confirmation_msg.message_id)
-    except Exception as e:
-        print(f"❌ Erreur suppression confirmation : {e}")
-
-# fin du resume du dernier message recu 
-
 # ======================== IMPORTS & VARIABLES ========================
 
 # ========== IMPORTS ESSENTIELS ==========
@@ -1016,11 +932,16 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from ban_storage import ban_list  # à ajouter tout en haut si pas déjà fait
 
+
+# STAFF DEBUT
+
+STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
+
 @dp.message_handler(lambda message: message.from_user.id != ADMIN_ID, content_types=types.ContentType.ANY)
 async def relay_from_client(message: types.Message):
     user_id = message.from_user.id
 
-    # 🔒 Vérifier si le client est banni par un admin
+    # 🔒 1) Vérifier si le client est banni par un admin (on garde ton comportement)
     for admin_id, clients_bannis in ban_list.items():
         if user_id in clients_bannis:
             try:
@@ -1033,13 +954,40 @@ async def relay_from_client(message: types.Message):
                 pass
             return  # ⛔ STOP : on n'envoie rien à l'admin
 
-    # ✅ Si pas banni → transfert normal
+    # 🔹 2) CAS NON-VIP → COMPORTEMENT ACTUEL : DM vers ADMIN_ID
+    if user_id not in authorized_users:
+        try:
+            sent_msg = await bot.forward_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+            # on garde exactement le même mécanisme pending_replies
+            pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
+            print(f"✅ Message NON-VIP reçu de {message.chat.id} et transféré à l'admin")
+        except Exception as e:
+            print(f"❌ Erreur transfert message client NON-VIP : {e}")
+        return
+
+    # 🔹 3) CAS VIP → on envoie dans le TOPIC du supergroupe staff
     try:
-        sent_msg = await bot.forward_message(chat_id=ADMIN_ID, from_chat_id=message.chat.id, message_id=message.message_id)
+        # crée / récupère le topic VIP pour ce client
+        topic_id = await ensure_topic_for_vip(message.from_user)
+
+        sent_msg = await bot.forward_message(
+            chat_id=STAFF_GROUP_ID,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id,
+            message_thread_id=topic_id  # 🔥 c'est ça qui l'envoie dans SON topic
+        )
+
+        # même logique que d'habitude : on mappe le message forwardé → client
         pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
-        print(f"✅ Message reçu de {message.chat.id} et transféré à l'admin")
+        print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
-        print(f"❌ Erreur transfert message client : {e}")
+        print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
+# STAFF FIN 
 
 
 
@@ -1123,14 +1071,6 @@ async def choix_type_message_vip(call: types.CallbackQuery):
             chat_id=ADMIN_ID,
             text="✍️ Envoie maintenant le message (texte/photo/vidéo) à diffuser GRATUITEMENT à tous les VIPs."
         )
-    else:
-        admin_modes[ADMIN_ID] = "en_attente_message_payant"
-        await bot.send_message(
-            chat_id=ADMIN_ID,
-            text="💰 Envoie maintenant le **média payant** à diffuser à tous les VIPs.\n"
-                 "⚠️ Mets bien une légende avec `/envXX` (ex: `/env14`)."
-        )
-
 
 # ========== TRAITEMENT MESSAGE GROUPÉ GRATUIT ==========
 
@@ -1174,62 +1114,6 @@ async def traiter_message_groupé(message: types.Message):
     await message.reply(f"Prévisualisation :\n\n{preview}", reply_markup=kb)
 
 
-# ========== TRAITEMENT MESSAGE GROUPÉ PAYANT ==========
-
-async def traiter_message_payant_groupé(message: types.Message):
-    import re
-
-    texte = message.caption or message.text or ""
-    match = re.search(r"/env(\d+|vip)", texte.lower())
-    if not match:
-        await bot.send_message(chat_id=ADMIN_ID, text="❗ Mets /envXX dans la légende (ex: /env14).")
-        return
-
-    code = match.group(1)
-    lien = liens_paiement.get(code)
-    if not lien:
-        await bot.send_message(chat_id=ADMIN_ID, text="❗ Ce montant n'est pas reconnu dans tes liens Stripe.")
-        return
-
-    # on remplace /envXX par le lien Stripe
-    nouvelle_legende = re.sub(r"/env(\d+|vip)", lien, texte, flags=re.IGNORECASE)
-
-    if not (message.photo or message.video or message.document):
-        await bot.send_message(chat_id=ADMIN_ID, text="❗ Envoie un média (photo/vidéo/document) avec /envXX.")
-        return
-
-    if message.photo:
-        type_media = "photo"
-        file_id = message.photo[-1].file_id
-    elif message.video:
-        type_media = "video"
-        file_id = message.video.file_id
-    else:
-        type_media = "document"
-        file_id = message.document.file_id
-
-    # on stocke POUR diffusion
-    pending_mass_message[ADMIN_ID] = {
-        "type": type_media,
-        "file_id": file_id,
-        "caption": nouvelle_legende,
-        "payant": True
-    }
-
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("✅ Confirmer l’envoi payant", callback_data="confirmer_envoi_groupé"),
-        InlineKeyboardButton("❌ Annuler", callback_data="annuler_envoi_groupé")
-    )
-
-    # prévisualisation côté admin
-    await bot.send_message(chat_id=ADMIN_ID, text="🧪 Prévisualisation du contenu payant à envoyer :")
-    if type_media == "photo":
-        await bot.send_photo(chat_id=ADMIN_ID, photo=file_id, caption=nouvelle_legende, reply_markup=kb)
-    elif type_media == "video":
-        await bot.send_video(chat_id=ADMIN_ID, video=file_id, caption=nouvelle_legende, reply_markup=kb)
-    else:
-        await bot.send_document(chat_id=ADMIN_ID, document=file_id, caption=nouvelle_legende, reply_markup=kb)
 
 
 # ========== CALLBACKS ENVOI / ANNULATION GROUPÉ ==========
@@ -1294,6 +1178,8 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
     await call.answer("❌ Envoi annulé.")
     pending_mass_message.pop(ADMIN_ID, None)
     await call.message.edit_text("❌ Envoi annulé.")
+
+
 
 #mettre le tableau de vips
 @dp.callback_query_handler(lambda c: c.data == "voir_mes_vips")

@@ -27,14 +27,23 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
+ # === TEST STAFF DEBUT
 @app.on_event("startup")
 async def startup_event():
     try:
         import bott_webhook
+        from vip_topics import load_vip_topics
+
         bott_webhook.initialize_authorized_users()
-        print(f"[STARTUP] Initialisation des utilisateurs VIP terminée.")
+        load_vip_topics()
+
+        print(f"[STARTUP] VIP + topics initialisés.")
     except Exception as e:
         print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
+
+# === TEST STAFF FIN 
+
+
 
 # === 221097 DEBUT
 app.include_router(stripe_router)
