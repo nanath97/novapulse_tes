@@ -868,60 +868,6 @@ async def handle_maj_bot(call: types.CallbackQuery):
 async def show_stats_direct(message: types.Message):
     await handle_stat(message)
 
-# test du résume du dernier message recu 
-
-
-import asyncio
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-annotations = {}   # {user_id: "texte note"}
-assignations = {}  # {user_id: "nom admin en charge"}
-
-@dp.message_handler(lambda message: message.chat.id not in authorized_admin_ids)
-async def handle_admin_message(message: types.Message):
-    user_id = message.from_user.id
-
-    def escape_html(text):
-        if not text:
-            return "[Message vide]"
-        return (
-            text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-        )
-
-    old_msg = escape_html(last_messages.get(user_id, "Aucun message"))
-    note_admin = annotations.get(user_id, "Aucune note")
-    admin_en_charge = assignations.get(user_id, "Aucun")
-
-    last_messages[user_id] = message.text or "[Message vide]"
-
-    await bot.forward_message(ADMIN_ID, user_id, message.message_id)
-
-    # Boutons Annoter et Prendre en charge
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
-        InlineKeyboardButton("📝 Annoter", callback_data=f"annoter_{user_id}")
-    )
-
-    response = (
-        "╭───── 🧠 RÉSUMÉ RAPIDE ─────\n"
-        f"📌 Ancien : {old_msg}\n"
-        f"👤 Admin en charge : {admin_en_charge}\n"
-        f"📒 Notes :\n{note_admin}\n"
-        "╰──────────────────────────\n"
-        "<i>Ce message sera supprimé automatiquement dans moins de 10 secondes.</i>"
-    )
-
-    sent_msg = await bot.send_message(ADMIN_ID, response, parse_mode="HTML", reply_markup=keyboard)
-
-    await asyncio.sleep(10)
-    try:
-        await bot.delete_message(chat_id=ADMIN_ID, message_id=sent_msg.message_id)
-    except Exception as e:
-        print(f"❌ Erreur suppression message : {e}")
-
 
 # ======================== IMPORTS & VARIABLES ========================
 
@@ -942,22 +888,24 @@ STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 async def relay_from_client(message: types.Message):
     user_id = message.from_user.id
 
-    # 🔒 1) Vérifier si le client est banni par un admin (on garde ton comportement)
+    # 🔒 1) Vérifier si le client est banni par un admin
     for admin_id, clients_bannis in ban_list.items():
         if user_id in clients_bannis:
             try:
                 await message.delete()
-            except:
+            except Exception:
                 pass
             try:
                 await bot.send_message(user_id, "🚫 You have been banned. You can no longer send messages.")
-            except:
+            except Exception:
                 pass
             return  # ⛔ STOP : on n'envoie rien à l'admin
 
+    # 🔍 Debug rapide pour les logs
+    print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
 
-        # 🔹 2) CAS NON-VIP au sens "pas encore de topic VIP"
-    if not is_vip(user_id):
+    # 🔹 2) CAS NON-VIP → DM admin (comportement historique)
+    if user_id not in authorized_users:
         try:
             sent_msg = await bot.forward_message(
                 chat_id=ADMIN_ID,
@@ -970,9 +918,9 @@ async def relay_from_client(message: types.Message):
             print(f"❌ Erreur transfert message client NON-VIP : {e}")
         return
 
-    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
+    # 🔹 3) CAS VIP → routage vers le topic du staff
     try:
-        topic_id = await ensure_topic_for_vip(message.from_user)  # récupère le même topic_id
+        topic_id = await ensure_topic_for_vip(message.from_user)  # crée ou récupère le topic VIP
 
         sent_msg = await bot.forward_message(
             chat_id=STAFF_GROUP_ID,
@@ -984,7 +932,6 @@ async def relay_from_client(message: types.Message):
         print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
-
 
 # STAFF FIN 
 
