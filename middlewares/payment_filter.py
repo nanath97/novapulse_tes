@@ -11,9 +11,19 @@ import os
 
 
 # Ces IDs DOIVENT être les mêmes que dans bott_webhook / Render
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))          # Admin vendeur
-DIRECTEUR_ID = int(os.getenv("DIRECTEUR_ID", "0"))  # Toi, si tu veux être exclu aussi
-STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))          # Admin vendeur (instance)
+DIRECTEUR_ID = int(os.getenv("DIRECTEUR_ID", "0"))  # Toi (si tu veux être exclu aussi)
+STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))  # Supergroupe staff / topics
+
+
+# ✅ Liste d'IDs qui ne doivent JAMAIS être limités par les 5 messages gratuits
+EXCLUDED_IDS = {
+    ADMIN_ID,
+    DIRECTEUR_ID,
+    7334072965,   # Ton ID perso (Nathan) → adapte si besoin
+    7334072965,   # ID de l'admin vendeur spécifique à ce bot → garde-le si utile
+}
+
 
 # Boutons de ton ReplyKeyboard qui NE doivent PAS être comptés comme messages gratuits
 BOUTONS_AUTORISES = [
@@ -56,31 +66,24 @@ class PaymentFilterMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
         user_id = message.from_user.id
         chat = message.chat
-        print(
-             f"[PAYMENT_MW] from user_id={user_id}, chat_id={chat.id}, "
-            f"ADMIN_ID={ADMIN_ID}, DIRECTEUR_ID={DIRECTEUR_ID}"
-)
 
-        # 0) Le filtre "5 messages" ne s'applique QUE dans les MP client ↔ bot
+        # DEBUG (facultatif, mais utile)
+        print(
+            f"[PAYMENT_MW] from user_id={user_id}, chat_id={chat.id}, "
+            f"chat_type={chat.type}, ADMIN_ID={ADMIN_ID}, "
+            f"DIRECTEUR_ID={DIRECTEUR_ID}, EXCLUDED_IDS={EXCLUDED_IDS}"
+        )
+
+        # 0) Staff / admins exclus de TOUT quota
+        if user_id in EXCLUDED_IDS:
+            return
+
+        # 1) Le filtre "5 messages" NE s'applique QUE dans les MP client ↔ bot
         #    → groupes / supergroupes / topics = ignorés
         if chat.type != "private":
             return
 
-        # 1) ADMIN / DIRECTEUR : pas de limite, seulement filtrage de liens
-        if user_id in {ADMIN_ID, DIRECTEUR_ID}:
-            # On filtre seulement les liens s'il y a du texte
-            if message.content_type == types.ContentType.TEXT:
-                if lien_non_autorise(message.text or ""):
-                    try:
-                        await message.delete()
-                        await message.answer("🚫 Seuls les liens autorisés sont acceptés.")
-                    except Exception as e:
-                        print(f"Erreur suppression lien admin/directeur : {e}")
-                    raise CancelHandler()
-            # Aucun quota pour eux
-            return
-
-        # 2) Anti-doublon (après avoir exclu admin/directeur)
+        # 2) Anti-doublon par message
         now = time.time()
         _prune_processed(now)
         key = (chat.id, message.message_id)
@@ -111,8 +114,7 @@ class PaymentFilterMiddleware(BaseMiddleware):
         if text.startswith("/start"):
             return
 
-        # 6) Autoriser les boutons prédéfinis (ces textes viennent de ton ReplyKeyboard)
-        #    On matche en "startswith" pour être un peu tolérant
+        # 6) Autoriser les boutons prédéfinis (ReplyKeyboard)
         for b in BOUTONS_AUTORISES:
             if text.startswith(b):
                 return
