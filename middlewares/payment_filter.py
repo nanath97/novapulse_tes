@@ -7,6 +7,11 @@ from ban_storage import ban_list  # Import de la ban_list
 
 import asyncio
 import time  # pour la fenêtre glissante
+import os
+
+
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # même valeur que dans bott_webhook / Render
+STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))  # on s'en sert juste après
 
 ADMIN_ID = 1788641757  # Ton ID Telegram admin celui du client
 
@@ -84,6 +89,13 @@ class PaymentFilterMiddleware(BaseMiddleware):
 
     async def on_pre_process_message(self, message: types.Message, data: dict):
         user_id = message.from_user.id
+
+
+        # 🧵 1) Ne jamais appliquer les 5 messages gratuits dans le supergroupe staff
+        # (topics VIP, échanges admin ↔ bot)
+        if message.chat.id == STAFF_GROUP_ID:
+            return
+
 
         # 🔒 Anti-doublon: s'assurer qu'on ne compte/envoie qu'une fois par message
         now = time.time()
