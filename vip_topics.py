@@ -2,7 +2,7 @@
 
 import os
 from aiogram import types
-from core import bot  # pas besoin de dp ici
+from core import bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
@@ -32,7 +32,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
 
     print(f"[VIP_TOPICS] Création d'un nouveau topic pour {user_id} dans {STAFF_GROUP_ID} avec le nom '{title}'")
 
-    # Appel brut à l'API Telegram pour créer le topic (forum)
+    # 👉 Création du topic via l'API brute
     res = await bot.request(
         "createForumTopic",
         {
@@ -45,7 +45,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     if topic_id is None:
         raise RuntimeError(f"[VIP_TOPICS] Impossible de créer un topic pour {user_id} : {res}")
 
-    # On mémorise les deux sens
+    # Mappings mémoire
     _user_to_topic[user_id] = topic_id
     _topic_to_user[topic_id] = user_id
 
@@ -65,7 +65,8 @@ async def ensure_topic_for_vip(user: types.User) -> int:
             )
         )
 
-        # IMPORTANT : on passe par l’API brute pour pouvoir utiliser message_thread_id
+        # ⚠️ IMPORTANT : on passe par bot.request + reply_markup=kb
+        # Aiogram s'occupe de le sérialiser pour Telegram.
         await bot.request(
             "sendMessage",
             {
@@ -77,9 +78,11 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                     "• Utilise `📝 Prendre une note` pour ajouter des infos sur lui.\n"
                 ),
                 "parse_mode": "Markdown",
-                "reply_markup": kb.to_python()
+                "reply_markup": kb
             }
         )
+        print(f"[VIP_TOPICS] Panneau de contrôle envoyé dans le topic {topic_id}")
+
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur envoi panneau de contrôle dans topic {topic_id} : {e}")
 
