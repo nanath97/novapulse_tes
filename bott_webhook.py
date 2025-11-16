@@ -797,86 +797,6 @@ async def show_stats_direct(message: types.Message):
 
 # ======================== IMPORTS & VARIABLES ========================
 
-# ========== IMPORTS ESSENTIELS ==========
-from aiogram import types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-# ========== HANDLER CLIENT : transfert vers admin ==========
-
-from ban_storage import ban_list  # à ajouter tout en haut si pas déjà fait
-
-
-# STAFF DEBUT
-
-STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
-
-@dp.message_handler(
-    lambda message: message.chat.type == "private" and message.from_user.id != ADMIN_ID,
-    content_types=types.ContentType.ANY
-)
-async def relay_from_client(message: types.Message):
-    user_id = message.from_user.id
-
-    # 🔍 Debug rapide
-    print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
-
-    # 🔒 1) Vérifier si le client est banni par un admin
-    for admin_id, clients_bannis in ban_list.items():
-        if user_id in clients_bannis:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            try:
-                await bot.send_message(user_id, "🚫 You have been banned. You can no longer send messages.")
-            except Exception:
-                pass
-            return  # ⛔ STOP : on n'envoie rien à l'admin
-
-    # 🔹 2) CAS NON-VIP → DM admin (comportement historique)
-    if user_id not in authorized_users:
-        try:
-            sent_msg = await bot.forward_message(
-                chat_id=ADMIN_ID,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
-            )
-            pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
-            print(f"✅ Message NON-VIP reçu de {message.chat.id} et transféré à l'admin")
-        except Exception as e:
-            print(f"❌ Erreur transfert message client NON-VIP : {e}")
-        return
-
-    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
-    try:
-        topic_id = await ensure_topic_for_vip(message.from_user)  # crée ou récupère le topic VIP
-
-        # On utilise l'API brute Telegram pour profiter de message_thread_id
-        res = await bot.request(
-            "forwardMessage",
-            {
-                "chat_id": STAFF_GROUP_ID,
-                "from_chat_id": message.chat.id,
-                "message_id": message.message_id,
-                "message_thread_id": topic_id,
-            }
-        )
-
-        # res est un dict de Message → on récupère message_id pour pending_replies
-        sent_msg_id = res.get("message_id")
-        if sent_msg_id:
-            pending_replies[(STAFF_GROUP_ID, sent_msg_id)] = message.chat.id
-
-        print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
-    except Exception as e:
-        print(f"❌ Erreur transfert message VIP vers topic : {e}")
-
-
-
-# STAFF FIN 
-
-
-
 # ========== HANDLER ADMIN : réponses privées + messages groupés ==========
 
 @dp.message_handler(lambda message: message.from_user.id == ADMIN_ID, content_types=types.ContentType.ANY)
@@ -1029,7 +949,81 @@ async def handle_admin_message(message: types.Message):
         await bot.send_message(chat_id=ADMIN_ID, text=f"❗Erreur admin -> client : {e}")
 
 
+# ========== IMPORTS ESSENTIELS ==========
+from aiogram import types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# ========== HANDLER CLIENT : transfert vers admin ==========
+
+from ban_storage import ban_list  # à ajouter tout en haut si pas déjà fait
+
+
+# STAFF DEBUT
+
+STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
+
+@dp.message_handler(
+    lambda message: message.chat.type == "private" and message.from_user.id != ADMIN_ID,
+    content_types=types.ContentType.ANY
+)
+async def relay_from_client(message: types.Message):
+    user_id = message.from_user.id
+
+    # 🔍 Debug rapide
+    print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
+
+    # 🔒 1) Vérifier si le client est banni par un admin
+    for admin_id, clients_bannis in ban_list.items():
+        if user_id in clients_bannis:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                await bot.send_message(user_id, "🚫 You have been banned. You can no longer send messages.")
+            except Exception:
+                pass
+            return  # ⛔ STOP : on n'envoie rien à l'admin
+
+    # 🔹 2) CAS NON-VIP → DM admin (comportement historique)
+    if user_id not in authorized_users:
+        try:
+            sent_msg = await bot.forward_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+            pending_replies[(sent_msg.chat.id, sent_msg.message_id)] = message.chat.id
+            print(f"✅ Message NON-VIP reçu de {message.chat.id} et transféré à l'admin")
+        except Exception as e:
+            print(f"❌ Erreur transfert message client NON-VIP : {e}")
+        return
+
+    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
+    try:
+        topic_id = await ensure_topic_for_vip(message.from_user)  # crée ou récupère le topic VIP
+
+        # On utilise l'API brute Telegram pour profiter de message_thread_id
+        res = await bot.request(
+            "forwardMessage",
+            {
+                "chat_id": STAFF_GROUP_ID,
+                "from_chat_id": message.chat.id,
+                "message_id": message.message_id,
+                "message_thread_id": topic_id,
+            }
+        )
+
+        # res est un dict de Message → on récupère message_id pour pending_replies
+        sent_msg_id = res.get("message_id")
+        if sent_msg_id:
+            pending_replies[(STAFF_GROUP_ID, sent_msg_id)] = message.chat.id
+
+        print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
+    except Exception as e:
+        print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
+        
 # ========== CHOIX DANS LE MENU INLINE ==========
 
 @dp.callback_query_handler(lambda call: call.data in ["vip_message_gratuit", "vip_message_payant"])
