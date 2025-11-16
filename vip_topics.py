@@ -2,14 +2,16 @@
 
 import os
 from aiogram import types
-from core import bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from core import bot
 
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-# Mémoire en RAM : user_id -> topic_id et topic_id -> user_id
-_user_to_topic = {}
+# Mémoire en RAM :
+# user_id -> {"topic_id": int, "panel_message_id": int}
+_user_topics = {}
+# topic_id -> user_id
 _topic_to_user = {}
 
 
@@ -17,22 +19,19 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     """
     Garantit qu'un VIP possède un topic dédié dans le STAFF_GROUP_ID.
     - Si le topic existe déjà, on renvoie juste son ID.
-    - Sinon, on crée un nouveau topic et on enregistre le mapping.
+    - Sinon, on crée un nouveau topic ET on envoie un panneau de contrôle
+      avec les boutons 'Prendre en charge' et 'Ajouter une note', puis
+      on mémorise aussi l'ID de ce panneau.
     """
     user_id = user.id
 
     # Si on a déjà un topic en mémoire, on le renvoie
-    if user_id in _user_to_topic:
-        topic_id = _user_to_topic[user_id]
-        print(f"[VIP_TOPICS] Topic déjà connu pour {user_id} -> {topic_id}")
-        return topic_id
+    if user_id in _user_topics:
+        return _user_topics[user_id]["topic_id"]
 
-    # Nom du topic : VIP + pseudo ou prénom
     title = f"VIP {user.username or user.first_name or str(user_id)}"
 
-    print(f"[VIP_TOPICS] Création d'un nouveau topic pour {user_id} dans {STAFF_GROUP_ID} avec le nom '{title}'")
-
-    # 👉 Création du topic via l'API brute
+    # 1) Créer le topic
     res = await bot.request(
         "createForumTopic",
         {
@@ -45,61 +44,61 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     if topic_id is None:
         raise RuntimeError(f"[VIP_TOPICS] Impossible de créer un topic pour {user_id} : {res}")
 
-    # Mappings mémoire
-    _user_to_topic[user_id] = topic_id
+    print(f"[VIP_TOPICS] Création d'un nouveau topic pour {user_id} dans {STAFF_GROUP_ID} avec le nom '{title}'")
     _topic_to_user[topic_id] = user_id
 
-    print(f"[VIP_TOPICS] Nouveau topic créé pour {user_id} → {topic_id}")
+    # 2) Envoyer le panneau de contrôle dans ce topic, AVEC BOUTONS
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
 
-    # 🔹 Panneau de contrôle figé en haut du topic
+    panel_text = (
+        "🧠 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user.username or user.first_name or str(user_id)}\n"
+        "📒 Notes : Aucune note\n"
+        "👤 Admin en charge : Aucun"
+    )
+
     try:
-        kb = InlineKeyboardMarkup()
-        kb.add(
-            InlineKeyboardButton(
-                "✅ Prendre en charge",
-                callback_data=f"prendre_{user_id}"
-            ),
-            InlineKeyboardButton(
-                "📝 Prendre une note",
-                callback_data=f"annoter_{user_id}"
-            )
-        )
-
-        # ⚠️ IMPORTANT : on passe par bot.request + reply_markup=kb
-        # Aiogram s'occupe de le sérialiser pour Telegram.
-        await bot.request(
+        panel_res = await bot.request(
             "sendMessage",
             {
                 "chat_id": STAFF_GROUP_ID,
+                "text": panel_text,
                 "message_thread_id": topic_id,
-                "text": (
-                    "📌 *Panneau de contrôle de ce client VIP*\n\n"
-                    "• Utilise `✅ Prendre en charge` pour t'assigner ce client.\n"
-                    "• Utilise `📝 Prendre une note` pour ajouter des infos sur lui.\n"
-                ),
-                "parse_mode": "Markdown",
-                "reply_markup": kb
+                "reply_markup": kb.to_python()
             }
         )
-        print(f"[VIP_TOPICS] Panneau de contrôle envoyé dans le topic {topic_id}")
-
+        panel_message_id = panel_res.get("message_id")
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur envoi panneau de contrôle dans topic {topic_id} : {e}")
+        panel_message_id = None
 
+    # 3) Mémoriser topic + panneau
+    _user_topics[user_id] = {
+        "topic_id": topic_id,
+        "panel_message_id": panel_message_id
+    }
+
+    print(f"[VIP_TOPICS] Nouveau topic créé pour {user_id} → {topic_id}")
     return topic_id
 
 
 def is_vip(user_id: int) -> bool:
-    """
-    Retourne True si on a déjà un topic pour ce user_id.
-    (Attention : ça teste juste la présence en mémoire, pas Airtable.)
-    """
-    return user_id in _user_to_topic
+    """True si on a déjà un topic pour ce user_id (en mémoire)."""
+    return user_id in _user_topics
 
 
 def get_user_id_by_topic_id(topic_id: int):
-    """
-    Permet au bot de retrouver le client associé à un topic staff.
-    Utilisé dans bott_webhook quand l'admin parle dans un topic.
-    """
+    """Retrouver le client associé à un topic staff."""
     return _topic_to_user.get(topic_id)
+
+
+def get_panel_message_id_by_user(user_id: int):
+    """Retourne l'ID du message 'panneau de contrôle' pour ce client (si existant)."""
+    data = _user_topics.get(user_id)
+    if not data:
+        return None
+    return data.get("panel_message_id")

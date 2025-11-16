@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
-from vip_topics import ensure_topic_for_vip, is_vip, get_user_id_by_topic_id
+from vip_topics import ensure_topic_for_vip, is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
 
 
 
@@ -1089,27 +1089,62 @@ assignations = {}
 note_mode = {}
 
 
+async def update_vip_panel(user_id: int):
+    """
+    Met à jour le panneau de contrôle dans le topic :
+    - Notes
+    - Admin en charge
+    """
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    panel_id = get_panel_message_id_by_user(user_id)
+    if not panel_id:
+        print(f"[VIP_PANEL] Aucun panneau trouvé pour le client {user_id}")
+        return
+
+    notes = annotations.get(user_id, "Aucune note")
+    admin_name = assignations.get(user_id, "Aucun")
+
+    panel_text = (
+        "🧠 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user_id}\n"
+        f"📒 Notes :\n{notes}\n\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
+
+    try:
+        await bot.edit_message_text(
+            chat_id=STAFF_GROUP_ID,
+            message_id=panel_id,
+            text=panel_text,
+            reply_markup=kb
+        )
+    except Exception as e:
+        print(f"[VIP_PANEL] Erreur lors de la mise à jour du panneau pour {user_id} : {e}")
+
+
 @dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
 async def prendre_en_charge(call: types.CallbackQuery):
-    """
-    Quand on clique sur ✅ Prendre en charge dans un topic.
-    """
     try:
-        user_id = int(call.data.split("_", 1)[1])
+        user_id = int(call.data.split("_")[1])
     except Exception:
         await call.answer("ID client invalide", show_alert=True)
         return
 
-    admin_name = (
-        call.from_user.first_name
-        or call.from_user.username
-        or str(call.from_user.id)
-    )
-
+    admin_name = call.from_user.first_name or call.from_user.username or str(call.from_user.id)
     assignations[user_id] = admin_name
 
-    # On confirme au chatter (petit toast, pas de nouveau message dans le topic)
-    await call.answer("Client pris en charge ✅", show_alert=False)
+    # 🔄 Mettre à jour le panneau de contrôle
+    await update_vip_panel(user_id)
+
+    await call.answer("Client pris en charge ✅")
+
 
     print(f"[ANNOTATION] {admin_name} a pris en charge le client {user_id}")
 
@@ -1135,42 +1170,43 @@ async def annoter_client(call: types.CallbackQuery):
     print(f"[ANNOTATION] Admin {admin_id} va écrire une note pour {user_id}")
 
 
-@dp.message_handler(lambda m: m.from_user.id in note_mode)
+@dp.message_handler(lambda m: admin_modes.get("annoter") is not None)
 async def enregistrer_annotation(message: types.Message):
-    """
-    Message suivant après un clic sur 'Prendre une note'.
-    """
-    admin_id = message.from_user.id
-    user_id_cible = note_mode.pop(admin_id, None)
-
-    if user_id_cible is None:
-        # mode annulé entre-temps
+    ctx = admin_modes.get("annoter")
+    if not ctx:
         return
 
-    texte = (message.text or "").strip()
-    if not texte:
-        await message.reply("❌ Note vide ignorée.")
+    # On ne prend que le bon admin (celui qui a cliqué sur "Ajouter une note")
+    if message.from_user.id != ctx["admin_id"]:
         return
 
-    ancienne_note = annotations.get(user_id_cible)
-    nouvelle_ligne = f"- {texte}"
+    user_id_cible = ctx["client_id"]
+    admin_modes.pop("annoter", None)
 
-    if ancienne_note:
+    ancienne_note = annotations.get(user_id_cible, "")
+    nouvelle_ligne = f"- {(message.text or '').strip()}"
+
+    if ancienne_note and ancienne_note != "Aucune note":
         annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
     else:
         annotations[user_id_cible] = nouvelle_ligne
 
-    confirmation_msg = await message.reply(
+    # 🔄 Mettre à jour le panneau de contrôle dans le topic
+    await update_vip_panel(user_id_cible)
+
+    # Petit message de confirmation temporaire
+    confirmation_msg = await message.answer(
         f"✅ Note ajoutée pour le client {user_id_cible}.\n"
         f"📒 Notes actuelles :\n{annotations[user_id_cible]}"
     )
 
-    # On nettoie la confirmation au bout de 10 secondes
+    import asyncio
     await asyncio.sleep(10)
     try:
         await bot.delete_message(chat_id=message.chat.id, message_id=confirmation_msg.message_id)
     except Exception as e:
-        print(f"❌ Erreur suppression confirmation note : {e}")
+        print(f"❌ Erreur suppression confirmation : {e}")
+
 
 
 #mettre le tableau de vips
