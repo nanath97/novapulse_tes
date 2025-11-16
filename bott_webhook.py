@@ -370,48 +370,6 @@ trigger_message = {}     # user_id -> (chat_id, message_id) du message "Voir le 
 # =======================
 # 1 Message "Voir le contenu du jour" -> propose "Lancer la roulette"
 # =======================
-@dp.message_handler(lambda message: message.text == "🔞 Voir le contenu du jour... tout en jouant 🎰")
-async def demande_contenu_jour(message: types.Message):
-    user_id = message.from_user.id
-
-    # Non-VIP -> propose d'acheter (inchangé)
-    if user_id not in authorized_users:
-        bouton_vip = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(
-                text="🔥 Rejoins le VIP pour 9 €",
-                url="https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G"
-            )
-        )
-        await message.reply(
-            "Tu veux tenter ta chance mon coeur ? 🍀\n\n"
-"🚨 Mais pour jouer et essayer d'obtenir le contenu d'aujourd'hui, tu dois être un VIP.\n\n"
-" Mais c'est ton jour de chance : aujourd'hui, il ne coûte que 9 € 🎁 ! Avec 2 photos nues et 1 vidéo très hard de ma chatte. 🔞\n\n"
-"C'est simple : clique sur le bouton ci-dessous 👇 et tente ta chance dès maintenant\n\n"
-"<i>🔐 Paiement sécurisé via Stripe</i>\n"
-
-            "https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G\n",
-            reply_markup=bouton_vip,
-            parse_mode="HTML"
-        )
-        return  # stop ici si ce n'est pas un VIP
-
-    # VIP -> mémoriser le message déclencheur d’origine (pour le forward répondable côté admin)
-    trigger_message[user_id] = (message.chat.id, message.message_id)
-
-    # Au lieu d'envoyer direct, on propose la roulette
-    bouton_roulette = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("⚡Fais tourner la roulette", callback_data="Fais tourner la roulette")
-    )
-    await message.reply(
-        "Prépare-toi à tenter ta chance avec le contenu d'aujourd'hui... Je croise les doigts pour toi, mon chérie 🤞 \n\n"
-        "Clique sur le bouton ci-dessous pour lancer la roulette 🎰",
-        reply_markup=bouton_roulette
-    )
-
-
-# =======================
-# 2) Callback "Lancer la roulette" -> roulette + attente + réponses + forward répondable
-# =======================
 @dp.callback_query_handler(lambda c: c.data == "Fais tourner la roulette")
 async def lancer_roulette(cb: types.CallbackQuery):
     user_id = cb.from_user.id
@@ -428,6 +386,7 @@ async def lancer_roulette(cb: types.CallbackQuery):
             show_alert=True
         )
         return
+
     # Marquer le lancement maintenant (évite le double-clic)
     last_played[user_id] = now
 
@@ -443,30 +402,52 @@ async def lancer_roulette(cb: types.CallbackQuery):
     src_info = trigger_message.get(user_id)  # (chat_id_src, msg_id_src)
     chat_id_src, msg_id_src = (src_info if src_info else (user_id, None))
 
-    # Message côté client + notif admin (sans changer ton flow de réponse admin)
-    if dice_value >= 60:  # JACKPOT => -50% (tu envoies ensuite manuellement)
+    # On prépare un texte commun pour la notif "côté vendeur" (admin + topic)
+    if dice_value >= 60:  # JACKPOT => -50%
+        # Message vers le client
         user_msg = await bot.send_message(
             chat_id=user_id,
-            text="🎉 Bravo, mon chérie ! Je t'offre 50 % de réduction sur la vidéo d'aujourd'hui. 🔥\n"
-                 "Je t'envoie ta vidéo dans quelques instants 💕"
+            text=(
+                "🎉 Bravo, mon chérie ! Je t'offre 50 % de réduction sur la vidéo d'aujourd'hui. 🔥\n"
+                "Je t'envoie ta vidéo dans quelques instants 💕"
+            )
         )
 
-        await bot.send_message(
-            chat_id=ADMIN_ID,
-            text="📥 JACKPOT (-50%) — un VIP vient de gagner. Envoie-lui son média."
-        )
+        notif_text = "📥 JACKPOT (-50%) — un VIP vient de gagner. Envoie-lui son média."
     else:
         user_msg = await bot.send_message(
             chat_id=user_id,
-            text="😅 Pas de chance cette fois-ci mon coeur…\n\n"
-                 "Mais tu sais quoi ? Je ne vais pas te laisser les mains vides... Je offre quand même 50 %  de réduction sur ma vidéo du jour. 🔥\n"
-                 "Je te l'envoie dans quelques instants💕"
+            text=(
+                "😅 Pas de chance cette fois-ci mon coeur…\n\n"
+                "Mais tu sais quoi ? Je ne vais pas te laisser les mains vides... Je t'offre quand même 50 % de réduction sur ma vidéo du jour. 🔥\n"
+                "Je te l'envoie dans quelques instants💕"
+            )
         )
 
-        await bot.send_message(
-            chat_id=ADMIN_ID,
-            text="📥 Raté, mais demande de contenu du jour ( -50% offert ). Envoie-lui son média."
+        notif_text = "📥 Raté, mais demande de contenu du jour (-50% offert). Envoie-lui son média."
+
+    # ⚙️ 1) Notif dans le panel admin (comme avant)
+    await bot.send_message(
+        chat_id=ADMIN_ID,
+        text=notif_text
+    )
+
+    # ⚙️ 2) Notif dans le TOPIC du client
+    try:
+        topic_id = await ensure_topic_for_vip(cb.from_user)
+        await bot.request(
+            "sendMessage",
+            {
+                "chat_id": STAFF_GROUP_ID,
+                "message_thread_id": topic_id,
+                "text": (
+                    f"{notif_text}\n\n"
+                    f"👤 Client : @{cb.from_user.username or cb.from_user.first_name or user_id}"
+                )
+            }
         )
+    except Exception as e:
+        print(f"[VIP_TOPICS] Erreur envoi notif roulette dans topic pour {user_id}: {e}")
 
     # 👉 Forward du message déclencheur d’origine (ton ancien comportement EXACT)
     if msg_id_src is not None:
@@ -478,12 +459,9 @@ async def lancer_roulette(cb: types.CallbackQuery):
         # Répondre à CE message côté admin => ça part directement chez l’utilisateur
         pending_replies[(forwarded.chat.id, forwarded.message_id)] = chat_id_src
 
-    # (Optionnel) tu peux aussi forward le message que le bot vient d'envoyer au client pour contexte :
-    # fwd_res = await bot.forward_message(chat_id=ADMIN_ID, from_chat_id=user_msg.chat.id, message_id=user_msg.message_id)
-    # pending_replies[(fwd_res.chat.id, fwd_res.message_id)] = user_msg.chat.id
-
     # Fermer le spinner du bouton inline côté client
     await cb.answer()
+
 
 
 
