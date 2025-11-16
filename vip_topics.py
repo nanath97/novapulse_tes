@@ -9,29 +9,27 @@ from core import bot
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
 # Mémoire en RAM :
-# user_id -> {"topic_id": int, "panel_message_id": int}
+#   user_id -> {"topic_id": int, "panel_message_id": int}
 _user_topics = {}
-# topic_id -> user_id
+#   topic_id -> user_id
 _topic_to_user = {}
 
 
 async def ensure_topic_for_vip(user: types.User) -> int:
     """
-    Garantit qu'un VIP possède un topic dédié dans le STAFF_GROUP_ID.
-    - Si le topic existe déjà, on renvoie juste son ID.
-    - Sinon, on crée un nouveau topic ET on envoie un panneau de contrôle
-      avec les boutons 'Prendre en charge' et 'Ajouter une note', puis
-      on mémorise aussi l'ID de ce panneau.
+    Garantit qu'un VIP possède un topic dédié dans STAFF_GROUP_ID.
+    - Si le topic existe déjà, renvoie son ID.
+    - Sinon, crée un topic + envoie un panneau de contrôle avec les boutons.
     """
     user_id = user.id
 
-    # Si on a déjà un topic en mémoire, on le renvoie
+    # Si on a déjà un topic connu en mémoire → on le renvoie
     if user_id in _user_topics:
         return _user_topics[user_id]["topic_id"]
 
     title = f"VIP {user.username or user.first_name or str(user_id)}"
 
-    # 1) Créer le topic
+    # 1) Créer le topic via l'API brute (aiogram.request)
     res = await bot.request(
         "createForumTopic",
         {
@@ -45,9 +43,10 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         raise RuntimeError(f"[VIP_TOPICS] Impossible de créer un topic pour {user_id} : {res}")
 
     print(f"[VIP_TOPICS] Création d'un nouveau topic pour {user_id} dans {STAFF_GROUP_ID} avec le nom '{title}'")
+
     _topic_to_user[topic_id] = user_id
 
-    # 2) Envoyer le panneau de contrôle dans ce topic, AVEC BOUTONS
+    # 2) Créer le panneau de contrôle AVEC boutons dans ce topic
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
@@ -61,20 +60,21 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         "👤 Admin en charge : Aucun"
     )
 
+    panel_message_id = None
     try:
         panel_res = await bot.request(
             "sendMessage",
             {
                 "chat_id": STAFF_GROUP_ID,
                 "text": panel_text,
-                "message_thread_id": topic_id,
+                "message_thread_id": topic_id,   # 🔥 clé : on passe par request(), pas send_message()
                 "reply_markup": kb.to_python()
             }
         )
         panel_message_id = panel_res.get("message_id")
+        print(f"[VIP_TOPICS] Panneau de contrôle envoyé pour {user_id} → msg_id={panel_message_id}")
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur envoi panneau de contrôle dans topic {topic_id} : {e}")
-        panel_message_id = None
 
     # 3) Mémoriser topic + panneau
     _user_topics[user_id] = {
@@ -87,17 +87,25 @@ async def ensure_topic_for_vip(user: types.User) -> int:
 
 
 def is_vip(user_id: int) -> bool:
-    """True si on a déjà un topic pour ce user_id (en mémoire)."""
+    """
+    True si on a déjà un topic pour ce user_id (en mémoire).
+    ATTENTION : c'est de la RAM, donc perdu à chaque restart.
+    """
     return user_id in _user_topics
 
 
 def get_user_id_by_topic_id(topic_id: int):
-    """Retrouver le client associé à un topic staff."""
+    """
+    Permet au bot de retrouver le client associé à un topic staff.
+    Utilisé quand l'admin parle dans un topic.
+    """
     return _topic_to_user.get(topic_id)
 
 
 def get_panel_message_id_by_user(user_id: int):
-    """Retourne l'ID du message 'panneau de contrôle' pour ce client (si existant)."""
+    """
+    Retourne l'ID du message 'panneau de contrôle' pour ce client (si existant).
+    """
     data = _user_topics.get(user_id)
     if not data:
         return None
