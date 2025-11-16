@@ -83,19 +83,12 @@ async def _send_control_panel_for_topic(topic_id: int, user: types.User):
     if user.username:
         texte += f"🔹 Pseudo : @{user.username}"
 
-    await bot.send_message(
-        chat_id=STAFF_GROUP_ID,
-        message_thread_id=topic_id,   # très important : pour que le message arrive DANS le topic
-        text=texte,
-        reply_markup=kb
-    )
+    payload = {
+        "chat_id": STAFF_GROUP_ID,
+        "message_thread_id": topic_id,   # ⬅️ on force l’envoi DANS le topic
+        "text": texte,
+        "reply_markup": kb.to_python(),  # ⬅️ on sérialise le clavier pour l'API brute
+    }
 
-
-def is_vip(user_id: int) -> bool:
-    """Retourne True si on a déjà un topic pour ce user_id."""
-    return user_id in _user_to_topic
-
-
-def get_user_id_by_topic_id(topic_id: int):
-    """Permet au bot de retrouver le client associé à un topic staff."""
-    return _topic_to_user.get(topic_id)
+    # Appel brut à l’API Telegram pour contourner la limite d’aiogram 2
+    await bot.request("sendMessage", payload)
