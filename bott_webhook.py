@@ -1079,56 +1079,47 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
 #  ANNOTATIONS & PRISE EN CHARGE PAR TOPIC
 # ==========================
 
-# {user_id_client: "texte note"}
-annotations = {}
+# ====== ANNOTATIONS & ASSIGNATIONS CLIENTS ======
+# (mets ce bloc UNE SEULE FOIS dans le fichier, pas besoin de redéclarer admin_modes si tu l'as déjà)
 
-# {user_id_client: "nom admin"}
-assignations = {}
-
-# {admin_id: user_id_client_en_cours_de_note}
-note_mode = {}
+annotations = {}   # {user_id: "texte note"}
+assignations = {}  # {user_id: "nom admin en charge"}
+# admin_modes = {}  # ⚠️ NE PAS redéclarer si déjà défini plus haut
 
 
-async def update_vip_panel(user_id: int):
+from aiogram.dispatcher.handler import CancelHandler
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+
+
+def _build_panel_text(user_id: int) -> str:
     """
-    Met à jour le panneau de contrôle dans le topic :
-    - Notes
-    - Admin en charge
+    Reconstruit le texte du panneau de contrôle pour un client donné.
     """
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-    panel_id = get_panel_message_id_by_user(user_id)
-    if not panel_id:
-        print(f"[VIP_PANEL] Aucun panneau trouvé pour le client {user_id}")
-        return
-
     notes = annotations.get(user_id, "Aucune note")
-    admin_name = assignations.get(user_id, "Aucun")
+    admin_en_charge = assignations.get(user_id, "Aucun")
 
-    panel_text = (
+    return (
         "🧠 PANEL DE CONTRÔLE VIP\n\n"
         f"👤 Client : {user_id}\n"
-        f"📒 Notes :\n{notes}\n\n"
-        f"👤 Admin en charge : {admin_name}"
+        f"📒 Notes :\n{notes}\n"
+        f"👤 Admin en charge : {admin_en_charge}"
     )
 
+
+def _build_panel_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Reconstruit les boutons du panneau (pour garder les callbacks cohérents).
+    """
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
         InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
     )
-
-    try:
-        await bot.edit_message_text(
-            chat_id=STAFF_GROUP_ID,
-            message_id=panel_id,
-            text=panel_text,
-            reply_markup=kb
-        )
-    except Exception as e:
-        print(f"[VIP_PANEL] Erreur lors de la mise à jour du panneau pour {user_id} : {e}")
+    return kb
 
 
+# ---------- BOUTON "PRENDRE EN CHARGE" ----------
 @dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
 async def prendre_en_charge(call: types.CallbackQuery):
     try:
@@ -1137,75 +1128,109 @@ async def prendre_en_charge(call: types.CallbackQuery):
         await call.answer("ID client invalide", show_alert=True)
         return
 
-    admin_name = call.from_user.first_name or call.from_user.username or str(call.from_user.id)
+    admin_name = (
+        call.from_user.first_name
+        or call.from_user.username
+        or str(call.from_user.id)
+    )
     assignations[user_id] = admin_name
 
-    # 🔄 Mettre à jour le panneau de contrôle
-    await update_vip_panel(user_id)
+    # On reconstruit tout le panneau proprement
+    panel_text = _build_panel_text(user_id)
+    kb = _build_panel_keyboard(user_id)
+
+    try:
+        await call.message.edit_text(panel_text, reply_markup=kb)
+    except Exception as e:
+        print(f"[PANEL] Erreur edit_text (prendre_en_charge) : {e}")
 
     await call.answer("Client pris en charge ✅")
 
 
-    print(f"[ANNOTATION] {admin_name} a pris en charge le client {user_id}")
-
-
+# ---------- BOUTON "AJOUTER UNE NOTE" ----------
 @dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
 async def annoter_client(call: types.CallbackQuery):
-    """
-    Quand on clique sur 📝 Prendre une note dans un topic.
-    On passe en mode 'note' pour CET admin uniquement.
-    """
     try:
-        user_id = int(call.data.split("_", 1)[1])
+        user_id = int(call.data.split("_")[1])
     except Exception:
         await call.answer("ID client invalide", show_alert=True)
         return
 
     admin_id = call.from_user.id
-    note_mode[admin_id] = user_id
 
-    await call.message.reply(f"✍️ Écris la note pour ce client (ID: {user_id}).")
-    await call.answer()  # ferme le spinner
+    # On mémorise le contexte pour le prochain message (la note)
+    admin_modes["annoter"] = {
+        "admin_id": admin_id,
+        "client_id": user_id,
+        "panel_chat_id": call.message.chat.id,
+        "panel_message_id": call.message.message_id,
+    }
 
-    print(f"[ANNOTATION] Admin {admin_id} va écrire une note pour {user_id}")
+    await call.message.answer(f"✍️ Écris la note pour ce client (ID: {user_id}).")
+    await call.answer()
 
 
+# ---------- MESSAGE = NOTE (après clic sur "Ajouter une note") ----------
 @dp.message_handler(lambda m: admin_modes.get("annoter") is not None)
 async def enregistrer_annotation(message: types.Message):
     ctx = admin_modes.get("annoter")
     if not ctx:
         return
 
-    # On ne prend que le bon admin (celui qui a cliqué sur "Ajouter une note")
+    # On ne prend en compte que le bon admin
     if message.from_user.id != ctx["admin_id"]:
         return
 
     user_id_cible = ctx["client_id"]
+    panel_chat_id = ctx["panel_chat_id"]
+    panel_message_id = ctx["panel_message_id"]
+
+    # On sort du mode "annoter"
     admin_modes.pop("annoter", None)
 
+    texte_note = (message.text or "").strip()
+    if not texte_note:
+        await message.answer("⚠️ La note est vide, rien n’a été enregistré.")
+        raise CancelHandler()
+
     ancienne_note = annotations.get(user_id_cible, "")
-    nouvelle_ligne = f"- {(message.text or '').strip()}"
+    nouvelle_ligne = f"- {texte_note}"
 
     if ancienne_note and ancienne_note != "Aucune note":
         annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
     else:
         annotations[user_id_cible] = nouvelle_ligne
 
-    # 🔄 Mettre à jour le panneau de contrôle dans le topic
-    await update_vip_panel(user_id_cible)
+    # 🔁 On reconstruit le panneau avec les nouvelles notes
+    panel_text = _build_panel_text(user_id_cible)
+    kb = _build_panel_keyboard(user_id_cible)
 
-    # Petit message de confirmation temporaire
+    try:
+        await bot.edit_message_text(
+            chat_id=panel_chat_id,
+            message_id=panel_message_id,
+            text=panel_text,
+            reply_markup=kb
+        )
+    except Exception as e:
+        print(f"[PANEL] Erreur edit_message_text (note) : {e}")
+
+    # Petit message de confirmation
     confirmation_msg = await message.answer(
-        f"✅ Note ajoutée pour le client {user_id_cible}.\n"
-        f"📒 Notes actuelles :\n{annotations[user_id_cible]}"
+        f"✅ Note ajoutée pour le client {user_id_cible}."
     )
 
-    import asyncio
     await asyncio.sleep(10)
     try:
         await bot.delete_message(chat_id=message.chat.id, message_id=confirmation_msg.message_id)
     except Exception as e:
         print(f"❌ Erreur suppression confirmation : {e}")
+
+    # ⚠️ Très important : on bloque ici pour que le GROS handler admin
+    # ne traite pas ce message comme un message vers un client.
+    raise CancelHandler()
+
+
 
 
 
