@@ -565,11 +565,31 @@ async def handle_start(message: types.Message):
                 montant=float(montant),
                 contenu="Paiement validé via Stripe webhook + redirection"
             )
-            await bot.send_message(ADMIN_ID, "✅ Paiement enregistré dans ton Dashboard.")
+            if topic_id is not None:
+                try:
+                    await bot.request(
+                        "sendMessage",
+                        {
+                            "chat_id": int(os.getenv("STAFF_GROUP_ID", "0")),
+                            "message_thread_id": topic_id,
+                            "text": (
+                                f"💰 *Nouveau paiement contenu*\n\n"
+                                f"👤 Client : @{message.from_user.username or message.from_user.first_name}\n"
+                                f"💶 Montant : {montant} €\n"
+                                f"📊 Paiement enregistré dans Airtable."
+                            ),
+                            "parse_mode": "Markdown"
+                        }
+                    )
+                except Exception as e:
+                    print(f"[VIP_TOPICS] Erreur envoi notif paiement contenu dans topic {topic_id} : {e}")
+
             return
-        else:
-            await bot.send_message(user_id, "❌ Le montant indiqué n’est pas valide.")
-            return
+
+        # 🔔 Notification dans le TOPIC du client (et plus dans le bot)
+         
+
+
         # === Cas B : /start=vipcdan (retour après paiement VIP) ===
     if param == "vipcdan":
         # 1) On marque le user comme VIP côté bot
@@ -636,6 +656,7 @@ async def handle_start(message: types.Message):
                 print(f"[VIP_TOPICS] Erreur envoi notif VIP dans topic {topic_id} : {e}")
 
         return  # on sort ici pour ne pas passer à l’accueil normal
+
 
 
     # === Cas C : /start simple (accueil normal) ===
