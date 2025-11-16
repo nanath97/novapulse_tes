@@ -497,7 +497,7 @@ async def handle_start(message: types.Message):
     user_id = message.from_user.id
     param = (message.get_args() or "").strip()
 
-    # === Cas A : /start=cdanXX (paiement Stripe) ===
+    # === Cas A : /start=cdanXX (paiement Stripe pour un contenu) ===
     if param.startswith("cdan") and param[4:].isdigit():
         montant = int(param[4:])
         if montant in prix_list:
@@ -507,8 +507,14 @@ async def handle_start(message: types.Message):
                 if now - t < timedelta(minutes=3)
             ]
             if not paiements_valides:
-                await bot.send_message(user_id, "❌ Paiement invalide ! Stripe a refusé votre paiement en raison d'un solde insuffisant ou d'un refus général. Veuillez vérifier vos capacités de paiement.")
-                await bot.send_message(ADMIN_ID, f"⚠️ Problème ! Stripe a refusé le paiement de ton client {message.from_user.username or message.from_user.first_name}.")
+                await bot.send_message(
+                    user_id,
+                    "❌ Paiement invalide ! Stripe a refusé votre paiement en raison d'un solde insuffisant ou d'un refus général. Veuillez vérifier vos capacités de paiement."
+                )
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"⚠️ Problème ! Stripe a refusé le paiement de ton client {message.from_user.username or message.from_user.first_name}."
+                )
                 return
 
             # Paiement validé
@@ -516,16 +522,30 @@ async def handle_start(message: types.Message):
             authorized_users.add(user_id)
             reset_free_quota(user_id)
 
+            # Si un contenu était en attente → on le livre
             if user_id in contenus_en_attente:
                 contenu = contenus_en_attente[user_id]
                 if contenu["type"] == types.ContentType.PHOTO:
-                    await bot.send_photo(chat_id=user_id, photo=contenu["file_id"], caption=contenu.get("caption"))
+                    await bot.send_photo(
+                        chat_id=user_id,
+                        photo=contenu["file_id"],
+                        caption=contenu.get("caption")
+                    )
                 elif contenu["type"] == types.ContentType.VIDEO:
-                    await bot.send_video(chat_id=user_id, video=contenu["file_id"], caption=contenu.get("caption"))
+                    await bot.send_video(
+                        chat_id=user_id,
+                        video=contenu["file_id"],
+                        caption=contenu.get("caption")
+                    )
                 elif contenu["type"] == types.ContentType.DOCUMENT:
-                    await bot.send_document(chat_id=user_id, document=contenu["file_id"], caption=contenu.get("caption"))
+                    await bot.send_document(
+                        chat_id=user_id,
+                        document=contenu["file_id"],
+                        caption=contenu.get("caption")
+                    )
                 del contenus_en_attente[user_id]
             else:
+                # Le client a payé avant que tu aies /envXX → on note le paiement en attente
                 paiements_en_attente_par_user.add(user_id)
 
             await bot.send_message(
@@ -534,7 +554,10 @@ async def handle_start(message: types.Message):
                 f"_❗️Si tu as le moindre soucis avec ta commande, contacte-nous à novapulse.online@gmail.com_",
                 parse_mode="Markdown"
             )
-            await bot.send_message(ADMIN_ID, f"💰 Nouveau paiement de {montant}€ de {message.from_user.username or message.from_user.first_name}.")
+            await bot.send_message(
+                ADMIN_ID,
+                f"💰 Nouveau paiement de {montant}€ de {message.from_user.username or message.from_user.first_name}."
+            )
             log_to_airtable(
                 pseudo=message.from_user.username or message.from_user.first_name,
                 user_id=user_id,
@@ -550,31 +573,44 @@ async def handle_start(message: types.Message):
 
     # === Cas B : /start=vipcdan (retour après paiement VIP) ===
     if param == "vipcdan":
+        # 1) On marque le user comme VIP côté bot
         authorized_users.add(user_id)
         reset_free_quota(user_id)
 
+        # 2) On crée / récupère le topic VIP + panneau de contrôle
+        try:
+            await ensure_topic_for_vip(message.from_user)
+        except Exception as e:
+            # On log mais ON NE BLOQUE PAS l'envoi des médias
+            print(f"[VIP] Erreur ensure_topic_for_vip pour {user_id}: {e}")
 
-# 🔹 création / récupération du topic VIP pour ce client STAFF FIN 
-        topic_id = await ensure_topic_for_vip(message.from_user)
-
-
-# 🔹 création / récupération du topic VIP pour ce client STAFF FIN
-
-
+        # 3) On envoie le pack VIP (2 photos + 1 vidéo)
         await bot.send_message(
             user_id,
             "✨ Bienvenue dans le VIP mon coeur 💕! Et voici ton cadeau 🎁:"
         )
 
         # 2 photos VIP
-        await bot.send_photo(chat_id=user_id, photo="AgACAgEAAxkBAAMxaRe_BtBD6d7hdvclCBxBSIPeRtYAAoULaxtVArlEyuuNXhy3_pgBAAMCAAN4AAM2BA")
-        await bot.send_photo(chat_id=user_id, photo="AgACAgEAAxkBAAMvaRe_AyWrpdwMVHguMI4Qy03mIt8AAgELaxv7zcBEf0CJnOTUnLUBAAMCAAN5AAM2BA")
+        await bot.send_photo(
+            chat_id=user_id,
+            photo="AgACAgEAAxkBAAMxaRe_BtBD6d7hdvclCBxBSIPeRtYAAoULaxtVArlEyuuNXhy3_pgBAAMCAAN4AAM2BA"
+        )
+        await bot.send_photo(
+            chat_id=user_id,
+            photo="AgACAgEAAxkBAAMvaRe_AyWrpdwMVHguMI4Qy03mIt8AAgELaxv7zcBEf0CJnOTUnLUBAAMCAAN5AAM2BA"
+        )
 
         # 1 vidéo VIP
-        await bot.send_video(chat_id=user_id, video="BAACAgEAAxkBAAMzaRe_FXGFxa985em5FslgcyIeRa0AAmUHAAJVArlE6gHI1Lq6DdE2BA")
+        await bot.send_video(
+            chat_id=user_id,
+            video="BAACAgEAAxkBAAMzaRe_FXGFxa985em5FslgcyIeRa0AAmUHAAJVArlE6gHI1Lq6DdE2BA"
+        )
 
-        # Logs
-        await bot.send_message(ADMIN_ID, f"🌟 Nouveau VIP : {message.from_user.username or message.from_user.first_name}.")
+        # 4) Logs Airtable + admin
+        await bot.send_message(
+            ADMIN_ID,
+            f"🌟 Nouveau VIP : {message.from_user.username or message.from_user.first_name}."
+        )
         log_to_airtable(
             pseudo=message.from_user.username or message.from_user.first_name,
             user_id=user_id,
@@ -623,85 +659,6 @@ async def handle_start(message: types.Message):
     except Exception as e:
         print(f"Erreur envoi directeur : {e}")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
-async def prendre_en_charge(call: types.CallbackQuery):
-    try:
-        user_id = int(call.data.split("_")[1])
-    except Exception:
-        await call.answer("ID client invalide", show_alert=True)
-        return
-
-    admin_name = call.from_user.first_name or call.from_user.username or str(call.from_user.id)
-    assignations[user_id] = admin_name
-
-    nouveau_texte = (call.message.text or "") + f"\n\n👤 Pris en charge par : {admin_name}"
-    try:
-        await call.message.edit_text(nouveau_texte, reply_markup=call.message.reply_markup)
-    except Exception as e:
-        print(f"Erreur edit_text prendre_en_charge : {e}")
-
-    await call.answer("Client pris en charge ✅")
-
-
-
-
-# TEST ANNOTER ET PRENDRE EN CHARGE DEBUT 
-
-
-annotations = {}   # {user_id: "texte note"}
-assignations = {}  # {user_id: "nom admin en charge"}
-admin_modes = {}   # déjà utilisé pour d'autres modes
-
-
-@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
-async def annoter_client(call: types.CallbackQuery):
-    try:
-        user_id = int(call.data.split("_")[1])
-    except Exception:
-        await call.answer("ID client invalide", show_alert=True)
-        return
-
-    admin_id = call.from_user.id
-    admin_modes["annoter"] = {"admin_id": admin_id, "client_id": user_id}
-
-    await call.message.answer(f"✍️ Écris la note pour ce client (ID: {user_id}).")
-    await call.answer()
-
-
-@dp.message_handler(lambda m: admin_modes.get("annoter") is not None)
-async def enregistrer_annotation(message: types.Message):
-    ctx = admin_modes.get("annoter")
-    if not ctx:
-        return
-
-    if message.from_user.id != ctx["admin_id"]:
-        # un autre admin parle → on ignore
-        return
-
-    user_id_cible = ctx["client_id"]
-    admin_modes.pop("annoter", None)
-
-    ancienne_note = annotations.get(user_id_cible, "")
-    nouvelle_ligne = f"- {(message.text or '').strip()}"
-
-    if ancienne_note and ancienne_note != "Aucune note":
-        annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
-    else:
-        annotations[user_id_cible] = nouvelle_ligne
-
-    confirmation_msg = await message.answer(
-        f"✅ Note ajoutée pour le client {user_id_cible}.\n"
-        f"📒 Notes actuelles :\n{annotations[user_id_cible]}"
-    )
-
-    import asyncio
-    await asyncio.sleep(10)
-    try:
-        await bot.delete_message(chat_id=message.chat.id, message_id=confirmation_msg.message_id)
-    except Exception as e:
-        print(f"❌ Erreur suppression confirmation : {e}")
-
-# TEST ANNOTER ET PRENDRE EN CHARGE FIN 
 
 # Message et média personnel avec lien 
 

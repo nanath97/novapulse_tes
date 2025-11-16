@@ -82,16 +82,10 @@ async def _send_control_panel_for_topic(topic_id: int, user: types.User):
 
 
 def is_vip(user_id: int) -> bool:
-    """
-    Retourne True si on a déjà un topic pour ce user_id.
-    (Attention : ça teste juste la présence en mémoire, pas Airtable.)
-    """
+    """Retourne True si on a déjà un topic pour ce user_id."""
     return user_id in _user_to_topic
 
 
 def get_user_id_by_topic_id(topic_id: int):
-    """
-    Permet au bot de retrouver le client associé à un topic staff.
-    Utilisé dans bott_webhook quand l'admin parle dans un topic.
-    """
+    """Permet au bot de retrouver le client associé à un topic staff."""
     return _topic_to_user.get(topic_id)
