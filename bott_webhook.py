@@ -348,19 +348,6 @@ keyboard.add(
 )
 
 # =======================
-import time
-import asyncio
-
-# Mémoire : dernier message "déclencheur" pour la roulette par user
-# user_id -> (chat_id_src, msg_id_src)
-trigger_message = {}
-
-# Cooldown + durée d'attente de l'animation 🎰
-last_played = {}              # user_id -> timestamp du dernier spin
-COOLDOWN_SECONDS = 24 * 3600  # 24h
-DICE_WAIT_SECONDS = 4         # temps pour laisser l'animation se jouer
-
-
 @dp.callback_query_handler(lambda c: c.data == "Fais tourner la roulette")
 async def lancer_roulette(cb: types.CallbackQuery):
     user_id = cb.from_user.id
@@ -393,9 +380,8 @@ async def lancer_roulette(cb: types.CallbackQuery):
     src_info = trigger_message.get(user_id)  # (chat_id_src, msg_id_src)
     chat_id_src, msg_id_src = (src_info if src_info else (user_id, None))
 
-    # On prépare un texte commun pour la notif "côté vendeur" (admin + topic)
-    if dice_value >= 60:  # JACKPOT => -50%
-        # Message vers le client
+    # Message côté client + texte pour l’admin / topic (logique IDENTIQUE)
+    if dice_value >= 60:  # JACKPOT => -50% (tu envoies ensuite manuellement)
         user_msg = await bot.send_message(
             chat_id=user_id,
             text=(
@@ -403,28 +389,26 @@ async def lancer_roulette(cb: types.CallbackQuery):
                 "Je t'envoie ta vidéo dans quelques instants 💕"
             )
         )
-
-        notif_text = "📥 JACKPOT (-50%) — un VIP vient de gagner. Envoie-lui son média."
+        admin_text = "📥 JACKPOT (-50%) — un VIP vient de gagner. Envoie-lui son média."
     else:
         user_msg = await bot.send_message(
             chat_id=user_id,
             text=(
                 "😅 Pas de chance cette fois-ci mon coeur…\n\n"
                 "Mais tu sais quoi ? Je ne vais pas te laisser les mains vides... "
-                "Je t'offre quand même 50 % de réduction sur ma vidéo du jour. 🔥\n"
+                "Je offre quand même 50 %  de réduction sur ma vidéo du jour. 🔥\n"
                 "Je te l'envoie dans quelques instants💕"
             )
         )
+        admin_text = "📥 Raté, mais demande de contenu du jour ( -50% offert ). Envoie-lui son média."
 
-        notif_text = "📥 Raté, mais demande de contenu du jour (-50% offert). Envoie-lui son média."
-
-    # ⚙️ 1) Notif dans le panel admin (comme avant)
+    # 1) Notif dans le bot admin (COMME AVANT)
     await bot.send_message(
         chat_id=ADMIN_ID,
-        text=notif_text
+        text=admin_text
     )
 
-    # ⚙️ 2) Notif dans le TOPIC du client
+    # 2) MÊME notif dans le TOPIC du client
     try:
         topic_id = await ensure_topic_for_vip(cb.from_user)
         await bot.request(
@@ -433,7 +417,7 @@ async def lancer_roulette(cb: types.CallbackQuery):
                 "chat_id": STAFF_GROUP_ID,
                 "message_thread_id": topic_id,
                 "text": (
-                    f"{notif_text}\n\n"
+                    f"{admin_text}\n\n"
                     f"👤 Client : @{cb.from_user.username or cb.from_user.first_name or user_id}"
                 )
             }
@@ -441,7 +425,7 @@ async def lancer_roulette(cb: types.CallbackQuery):
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur envoi notif roulette dans topic pour {user_id}: {e}")
 
-    # 👉 Forward du message déclencheur d’origine (ton ancien comportement EXACT)
+    # 👉 Forward du message déclencheur d’origine (COMPORTEMENT D’ORIGINE)
     if msg_id_src is not None:
         forwarded = await bot.forward_message(
             chat_id=ADMIN_ID,
