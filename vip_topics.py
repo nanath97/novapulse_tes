@@ -22,27 +22,36 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     - Sinon, crée un topic + envoie un panneau de contrôle avec les boutons.
     """
     user_id = user.id
+    print(f"[VIP_TOPICS] ensure_topic_for_vip() appelé pour user_id={user_id}")
 
     # Si on a déjà un topic connu en mémoire → on le renvoie
     if user_id in _user_topics:
-        return _user_topics[user_id]["topic_id"]
+        topic_id = _user_topics[user_id]["topic_id"]
+        print(f"[VIP_TOPICS] Topic déjà connu pour {user_id} -> {topic_id}")
+        return topic_id
 
     title = f"VIP {user.username or user.first_name or str(user_id)}"
 
     # 1) Créer le topic via l'API brute (aiogram.request)
-    res = await bot.request(
-        "createForumTopic",
-        {
-            "chat_id": STAFF_GROUP_ID,
-            "name": title
-        }
-    )
+    try:
+        res = await bot.request(
+            "createForumTopic",
+            {
+                "chat_id": STAFF_GROUP_ID,
+                "name": title
+            }
+        )
+    except Exception as e:
+        print(f"[VIP_TOPICS] ERREUR createForumTopic pour {user_id} : {e}")
+        # On ne bloque pas /start, on renvoie une valeur bidon
+        return 0
 
     topic_id = res.get("message_thread_id")
     if topic_id is None:
-        raise RuntimeError(f"[VIP_TOPICS] Impossible de créer un topic pour {user_id} : {res}")
+        print(f"[VIP_TOPICS] Pas de message_thread_id dans la réponse pour {user_id} : {res}")
+        return 0
 
-    print(f"[VIP_TOPICS] Création d'un nouveau topic pour {user_id} dans {STAFF_GROUP_ID} avec le nom '{title}'")
+    print(f"[VIP_TOPICS] Nouveau topic créé pour {user_id} dans {STAFF_GROUP_ID} -> topic_id={topic_id}")
 
     _topic_to_user[topic_id] = user_id
 
@@ -67,8 +76,9 @@ async def ensure_topic_for_vip(user: types.User) -> int:
             {
                 "chat_id": STAFF_GROUP_ID,
                 "text": panel_text,
-                "message_thread_id": topic_id,   # 🔥 clé : on passe par request(), pas send_message()
-                "reply_markup": kb.to_python()
+                "message_thread_id": topic_id,
+                # On passe directement l'objet kb, aiogram sait le sérialiser
+                "reply_markup": kb
             }
         )
         panel_message_id = panel_res.get("message_id")
@@ -82,7 +92,6 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         "panel_message_id": panel_message_id
     }
 
-    print(f"[VIP_TOPICS] Nouveau topic créé pour {user_id} → {topic_id}")
     return topic_id
 
 
