@@ -1075,6 +1075,102 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
     pending_mass_message.pop(ADMIN_ID, None)
     await call.message.edit_text("❌ Envoi annulé.")
 
+# ==========================
+#  ANNOTATIONS & PRISE EN CHARGE PAR TOPIC
+# ==========================
+
+# {user_id_client: "texte note"}
+annotations = {}
+
+# {user_id_client: "nom admin"}
+assignations = {}
+
+# {admin_id: user_id_client_en_cours_de_note}
+note_mode = {}
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
+async def prendre_en_charge(call: types.CallbackQuery):
+    """
+    Quand on clique sur ✅ Prendre en charge dans un topic.
+    """
+    try:
+        user_id = int(call.data.split("_", 1)[1])
+    except Exception:
+        await call.answer("ID client invalide", show_alert=True)
+        return
+
+    admin_name = (
+        call.from_user.first_name
+        or call.from_user.username
+        or str(call.from_user.id)
+    )
+
+    assignations[user_id] = admin_name
+
+    # On confirme au chatter (petit toast, pas de nouveau message dans le topic)
+    await call.answer("Client pris en charge ✅", show_alert=False)
+
+    print(f"[ANNOTATION] {admin_name} a pris en charge le client {user_id}")
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
+async def annoter_client(call: types.CallbackQuery):
+    """
+    Quand on clique sur 📝 Prendre une note dans un topic.
+    On passe en mode 'note' pour CET admin uniquement.
+    """
+    try:
+        user_id = int(call.data.split("_", 1)[1])
+    except Exception:
+        await call.answer("ID client invalide", show_alert=True)
+        return
+
+    admin_id = call.from_user.id
+    note_mode[admin_id] = user_id
+
+    await call.message.reply(f"✍️ Écris la note pour ce client (ID: {user_id}).")
+    await call.answer()  # ferme le spinner
+
+    print(f"[ANNOTATION] Admin {admin_id} va écrire une note pour {user_id}")
+
+
+@dp.message_handler(lambda m: m.from_user.id in note_mode)
+async def enregistrer_annotation(message: types.Message):
+    """
+    Message suivant après un clic sur 'Prendre une note'.
+    """
+    admin_id = message.from_user.id
+    user_id_cible = note_mode.pop(admin_id, None)
+
+    if user_id_cible is None:
+        # mode annulé entre-temps
+        return
+
+    texte = (message.text or "").strip()
+    if not texte:
+        await message.reply("❌ Note vide ignorée.")
+        return
+
+    ancienne_note = annotations.get(user_id_cible)
+    nouvelle_ligne = f"- {texte}"
+
+    if ancienne_note:
+        annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
+    else:
+        annotations[user_id_cible] = nouvelle_ligne
+
+    confirmation_msg = await message.reply(
+        f"✅ Note ajoutée pour le client {user_id_cible}.\n"
+        f"📒 Notes actuelles :\n{annotations[user_id_cible]}"
+    )
+
+    # On nettoie la confirmation au bout de 10 secondes
+    await asyncio.sleep(10)
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=confirmation_msg.message_id)
+    except Exception as e:
+        print(f"❌ Erreur suppression confirmation note : {e}")
 
 
 #mettre le tableau de vips
