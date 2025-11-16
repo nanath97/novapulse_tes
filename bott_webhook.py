@@ -557,6 +557,7 @@ async def handle_start(message: types.Message):
 # 🔹 création / récupération du topic VIP pour ce client STAFF FIN 
         topic_id = await ensure_topic_for_vip(message.from_user)
 
+
 # 🔹 création / récupération du topic VIP pour ce client STAFF FIN
 
 
@@ -622,6 +623,85 @@ async def handle_start(message: types.Message):
     except Exception as e:
         print(f"Erreur envoi directeur : {e}")
 
+@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
+async def prendre_en_charge(call: types.CallbackQuery):
+    try:
+        user_id = int(call.data.split("_")[1])
+    except Exception:
+        await call.answer("ID client invalide", show_alert=True)
+        return
+
+    admin_name = call.from_user.first_name or call.from_user.username or str(call.from_user.id)
+    assignations[user_id] = admin_name
+
+    nouveau_texte = (call.message.text or "") + f"\n\n👤 Pris en charge par : {admin_name}"
+    try:
+        await call.message.edit_text(nouveau_texte, reply_markup=call.message.reply_markup)
+    except Exception as e:
+        print(f"Erreur edit_text prendre_en_charge : {e}")
+
+    await call.answer("Client pris en charge ✅")
+
+
+
+
+# TEST ANNOTER ET PRENDRE EN CHARGE DEBUT 
+
+
+annotations = {}   # {user_id: "texte note"}
+assignations = {}  # {user_id: "nom admin en charge"}
+admin_modes = {}   # déjà utilisé pour d'autres modes
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
+async def annoter_client(call: types.CallbackQuery):
+    try:
+        user_id = int(call.data.split("_")[1])
+    except Exception:
+        await call.answer("ID client invalide", show_alert=True)
+        return
+
+    admin_id = call.from_user.id
+    admin_modes["annoter"] = {"admin_id": admin_id, "client_id": user_id}
+
+    await call.message.answer(f"✍️ Écris la note pour ce client (ID: {user_id}).")
+    await call.answer()
+
+
+@dp.message_handler(lambda m: admin_modes.get("annoter") is not None)
+async def enregistrer_annotation(message: types.Message):
+    ctx = admin_modes.get("annoter")
+    if not ctx:
+        return
+
+    if message.from_user.id != ctx["admin_id"]:
+        # un autre admin parle → on ignore
+        return
+
+    user_id_cible = ctx["client_id"]
+    admin_modes.pop("annoter", None)
+
+    ancienne_note = annotations.get(user_id_cible, "")
+    nouvelle_ligne = f"- {(message.text or '').strip()}"
+
+    if ancienne_note and ancienne_note != "Aucune note":
+        annotations[user_id_cible] = ancienne_note + "\n" + nouvelle_ligne
+    else:
+        annotations[user_id_cible] = nouvelle_ligne
+
+    confirmation_msg = await message.answer(
+        f"✅ Note ajoutée pour le client {user_id_cible}.\n"
+        f"📒 Notes actuelles :\n{annotations[user_id_cible]}"
+    )
+
+    import asyncio
+    await asyncio.sleep(10)
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=confirmation_msg.message_id)
+    except Exception as e:
+        print(f"❌ Erreur suppression confirmation : {e}")
+
+# TEST ANNOTER ET PRENDRE EN CHARGE FIN 
 
 # Message et média personnel avec lien 
 
