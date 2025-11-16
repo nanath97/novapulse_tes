@@ -570,19 +570,19 @@ async def handle_start(message: types.Message):
         else:
             await bot.send_message(user_id, "❌ Le montant indiqué n’est pas valide.")
             return
-
-    # === Cas B : /start=vipcdan (retour après paiement VIP) ===
+        # === Cas B : /start=vipcdan (retour après paiement VIP) ===
     if param == "vipcdan":
         # 1) On marque le user comme VIP côté bot
         authorized_users.add(user_id)
         reset_free_quota(user_id)
 
-        # 2) On crée / récupère le topic VIP + panneau de contrôle
+        # 2) On crée / récupère le topic VIP pour ce client
         try:
-            await ensure_topic_for_vip(message.from_user)
+            topic_id = await ensure_topic_for_vip(message.from_user)
         except Exception as e:
             # On log mais ON NE BLOQUE PAS l'envoi des médias
             print(f"[VIP] Erreur ensure_topic_for_vip pour {user_id}: {e}")
+            topic_id = None  # pour éviter un NameError plus loin
 
         # 3) On envoie le pack VIP (2 photos + 1 vidéo)
         await bot.send_message(
@@ -606,11 +606,7 @@ async def handle_start(message: types.Message):
             video="BAACAgEAAxkBAAMzaRe_FXGFxa985em5FslgcyIeRa0AAmUHAAJVArlE6gHI1Lq6DdE2BA"
         )
 
-        # 4) Logs Airtable + admin
-        await bot.send_message(
-            ADMIN_ID,
-            f"🌟 Nouveau VIP : {message.from_user.username or message.from_user.first_name}."
-        )
+        # 4) Logs Airtable
         log_to_airtable(
             pseudo=message.from_user.username or message.from_user.first_name,
             user_id=user_id,
@@ -618,8 +614,29 @@ async def handle_start(message: types.Message):
             montant=9.0,
             contenu="Pack 2 photos + 1 vidéo + accès VIP"
         )
-        await bot.send_message(ADMIN_ID, "✅ VIP Access enregistré dans ton dashboard.")
+
+        # 5) Notification dans le TOPIC du client (si on a réussi à le récupérer)
+        if topic_id is not None:
+            try:
+                await bot.request(
+                    "sendMessage",
+                    {
+                        "chat_id": int(os.getenv("STAFF_GROUP_ID", "0")),
+                        "message_thread_id": topic_id,
+                        "text": (
+                            f"🌟 *Nouveau VIP confirmé*\n\n"
+                            f"👤 Client : @{message.from_user.username or message.from_user.first_name}\n"
+                            f"💶 Montant : 9 €\n"
+                            f"📊 Accès VIP enregistré dans le dashboard."
+                        ),
+                        "parse_mode": "Markdown"
+                    }
+                )
+            except Exception as e:
+                print(f"[VIP_TOPICS] Erreur envoi notif VIP dans topic {topic_id} : {e}")
+
         return  # on sort ici pour ne pas passer à l’accueil normal
+
 
     # === Cas C : /start simple (accueil normal) ===
     if user_id == ADMIN_ID:
