@@ -5,7 +5,6 @@ from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core import bot
 from bott_webhook import authorized_users
-from vip_topics import ensure_topic_for_vip
 
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
@@ -121,27 +120,3 @@ def get_panel_message_id_by_user(user_id: int):
     if not data:
         return None
     return data.get("panel_message_id")
-
-
-# Dans vip_topics.py
-
-
-async def load_vip_topics():
-    for user_id in list(authorized_users):
-        try:
-            # Récupérer les infos du user (pour obtenir son nom/pseudo)
-            chat = await bot.get_chat(user_id)
-        except Exception as e:
-            print(f"[WARN] Impossible d'obtenir le profil Telegram {user_id} : {e}")
-            continue
-        # Construire un objet User temporaire avec les infos disponibles
-        user = types.User(id=chat.id, 
-                          is_bot=False, 
-                          first_name=chat.first_name or "", 
-                          last_name=chat.last_name or "", 
-                          username=chat.username or "")
-        # Créer ou retrouver le topic forum pour ce VIP
-        try:
-            await ensure_topic_for_vip(user)
-        except Exception as e:
-            print(f"[ERROR] Erreur lors de la création du topic pour {user_id} : {e}")

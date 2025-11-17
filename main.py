@@ -45,8 +45,6 @@ async def startup_event():
 
 # === TEST STAFF FIN 
 
-
-
 # === 221097 DEBUT
 app.include_router(stripe_router)
 # === 221097 FIN
