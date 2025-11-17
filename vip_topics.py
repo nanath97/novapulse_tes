@@ -131,8 +131,22 @@ def get_panel_message_id_by_user(user_id: int):
     return data.get("panel_message_id")
 
 async def load_vip_topics():
-    load_vip_topics_from_disk()
+    try:
+        with open(VIP_TOPICS_FILE, "r") as f:
+            data = json.load(f)
+            for user_id_str, d in data.items():
+                if "topic_id" in d:
+                    user_id = int(user_id_str)
+                    _user_topics[user_id] = d
+                    _topic_to_user[d["topic_id"]] = user_id
+                    print(f"[VIP_TOPICS] Topic restauré : user_id={user_id} -> topic_id={d['topic_id']}")
+    except FileNotFoundError:
+        print("[VIP_TOPICS] Aucun fichier de topics à charger.")
+    except Exception as e:
+        print(f"[VIP_TOPICS] Erreur au chargement des topics : {e}")
+
     for user_id in authorized_users:
         if user_id not in _user_topics:
             dummy_user = types.User(id=user_id, is_bot=False, first_name=str(user_id))
             await ensure_topic_for_vip(dummy_user)
+
