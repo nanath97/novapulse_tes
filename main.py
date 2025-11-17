@@ -27,23 +27,20 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
- # === TEST STAFF DEBUT
+# === TEST STAFF DEBUT
 @app.on_event("startup")
 async def startup_event():
     try:
-        import bott_webhook
+        from bott_webhook import initialize_authorized_users
         from vip_topics import load_vip_topics
 
-        bott_webhook.initialize_authorized_users()
-        load_vip_topics()
+        initialize_authorized_users()          # Charge les VIP depuis Airtable (synchrones)
+        await load_vip_topics()                # Recrée les topics (asynchrone)
 
         print(f"[STARTUP] VIP + topics initialisés.")
     except Exception as e:
         print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
-
-
-
-# === TEST STAFF FIN 
+# === TEST STAFF FIN
 
 # === 221097 DEBUT
 app.include_router(stripe_router)
