@@ -123,3 +123,8 @@ def get_panel_message_id_by_user(user_id: int):
     if not data:
         return None
     return data.get("panel_message_id")
+
+async def load_vip_topics():
+    for user_id in authorized_users:
+        dummy_user = types.User(id=user_id, is_bot=False, first_name=str(user_id))
+        await ensure_topic_for_vip(dummy_user)
