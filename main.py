@@ -6,6 +6,7 @@ from core import bot, dp
 import bott_webhook
 from stripe_webhook import router as stripe_router
 from vip_topics import load_vip_topics
+from vip_topics import load_vip_topics_from_disk
 
 
 
@@ -36,7 +37,9 @@ from vip_topics import load_vip_topics_from_disk
 async def startup_event():
     try:
         bott_webhook.initialize_authorized_users
-        await load_vip_topics()      # 👈 s’assure que ceux manquants sont créés
+        
+        load_vip_topics_from_disk()
+        await load_vip_topics()    # 👈 s’assure que ceux manquants sont créés
 
         print(f"[STARTUP] VIP + topics initialisés.")
     except Exception as e:
