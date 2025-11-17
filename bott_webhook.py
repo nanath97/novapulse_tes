@@ -782,7 +782,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list  # à ajouter tout en haut si pas déjà fait
 
 
-# STAFF DEBUT
 
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
@@ -793,10 +792,8 @@ STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 async def relay_from_client(message: types.Message):
     user_id = message.from_user.id
 
-    # 🔍 Debug rapide
     print(f"[RELAY] message from {user_id} (chat {message.chat.id}), authorized={user_id in authorized_users}")
 
-    # 🔒 1) Vérifier si le client est banni par un admin
     for admin_id, clients_bannis in ban_list.items():
         if user_id in clients_bannis:
             try:
@@ -807,9 +804,8 @@ async def relay_from_client(message: types.Message):
                 await bot.send_message(user_id, "🚫 You have been banned. You can no longer send messages.")
             except Exception:
                 pass
-            return  # ⛔ STOP : on n'envoie rien à l'admin
+            return
 
-    # 🔹 2) CAS NON-VIP → DM admin (comportement historique)
     if user_id not in authorized_users:
         try:
             sent_msg = await bot.forward_message(
@@ -823,12 +819,12 @@ async def relay_from_client(message: types.Message):
             print(f"❌ Erreur transfert message client NON-VIP : {e}")
         return
 
-    # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
     try:
         from vip_topics import ensure_topic_for_vip
-        
 
-        # On utilise l'API brute Telegram pour profiter de message_thread_id
+        # 👉 AJOUT MANQUANT ICI :
+        topic_id = await ensure_topic_for_vip(message.from_user)
+
         res = await bot.request(
             "forwardMessage",
             {
@@ -839,7 +835,6 @@ async def relay_from_client(message: types.Message):
             }
         )
 
-        # res est un dict de Message → on récupère message_id pour pending_replies
         sent_msg_id = res.get("message_id")
         if sent_msg_id:
             pending_replies[(STAFF_GROUP_ID, sent_msg_id)] = message.chat.id
@@ -847,6 +842,7 @@ async def relay_from_client(message: types.Message):
         print(f"✅ Message VIP reçu de {message.chat.id} et transféré dans le topic {topic_id}")
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
+
 
 
 # ========== CHOIX DANS LE MENU INLINE ==========
