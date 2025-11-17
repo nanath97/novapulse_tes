@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
-from vip_topics import ensure_topic_for_vip, is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
+from vip_topics import is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
 
 
 
