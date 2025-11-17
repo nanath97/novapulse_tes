@@ -21,13 +21,14 @@ EXCLUDED_IDS = {
     ADMIN_ID,
     DIRECTEUR_ID,
     7334072965,   # Ton ID perso (Nathan) → adapte si besoin
-    7334072965,   # ID de l'admin vendeur spécifique à ce bot → garde-le si utile
+    1788641757,   # ID de l'admin vendeur spécifique à ce bot → garde-le si utile
 }
 
 
 # Boutons de ton ReplyKeyboard qui NE doivent PAS être comptés comme messages gratuits
 BOUTONS_AUTORISES = [
-    "🔞 Voir le contenu du jour... tout en jouant 🎰"
+    "🔞 Voir le contenu du jour... tout en jouant 🎰",
+    "✨Discuter en tant que VIP",
 ]
 
 # ===== Paramètres "messages gratuits" =====
