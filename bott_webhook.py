@@ -824,6 +824,7 @@ async def relay_from_client(message: types.Message):
 
     # 🔹 3) CAS VIP → il a un topic, on route vers ce topic
     try:
+        from vip_topics import ensure_topic_for_vip
         topic_id = await ensure_topic_for_vip(message.from_user)  # crée ou récupère le topic VIP
 
         # On utilise l'API brute Telegram pour profiter de message_thread_id
