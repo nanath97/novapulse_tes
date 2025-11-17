@@ -41,6 +41,8 @@ async def startup_event():
     except Exception as e:
         print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
 
+
+
 # === TEST STAFF FIN 
 
 
