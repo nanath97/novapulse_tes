@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from core import bot, dp
 import bott_webhook
 from stripe_webhook import router as stripe_router
+from vip_topics import load_vip_topics
+
 
 
 
