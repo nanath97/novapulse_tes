@@ -630,8 +630,15 @@ async def envoyer_contenu_payant(message: types.Message):
             # on enlève le /envXX dans la caption envoyée après paiement
             "caption": re.sub(r"/env(\d+|vip)", "", texte, flags=re.IGNORECASE).strip()
         }
+        from vip_topics import ensure_topic_for_vip
+        dummy_user = types.User(id=user_id, is_bot=False, first_name=str(user_id))
+        topic_id = await ensure_topic_for_vip(dummy_user)
 
-        await bot.send_message(chat_id=ADMIN_ID, text=f"✅ Contenu prêt pour l'utilisateur {user_id}.")
+        await bot.send_message(
+            chat_id=STAFF_GROUP_ID,
+            message_thread_id=topic_id,
+            text=f"✅ Contenu prêt pour l'utilisateur {user_id}."
+        )
 
         # cas où le client avait déjà payé → on envoie direct
         if user_id in paiements_en_attente_par_user:
@@ -658,6 +665,7 @@ async def envoyer_contenu_payant(message: types.Message):
         text=f"_🔒 Ce contenu {code} € est verrouillé. Clique sur le lien ci-dessus pour le déverrouiller._",
         parse_mode="Markdown"
     )
+
 
 
 @dp.message_handler(lambda message: message.text == "📖 Commandes" and message.from_user.id == ADMIN_ID)
