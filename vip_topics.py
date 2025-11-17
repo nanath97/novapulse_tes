@@ -6,6 +6,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core import bot
 from bott_webhook import authorized_users
 
+
+
+
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
