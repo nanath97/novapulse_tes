@@ -7,9 +7,6 @@ import bott_webhook
 from stripe_webhook import router as stripe_router
 
 
-
-
-
 load_dotenv()
 
 
@@ -25,25 +22,6 @@ async def telegram_webhook(request: Request):
         print("Erreur dans webhook :", e)
         return {"ok": False, "error": str(e)}
     return {"ok": True}
-
-
- # === TEST STAFF DEBUT
-@app.on_event("startup")
-async def startup_event():
-    try:
-        import bott_webhook
-        from vip_topics import load_vip_topics
-
-        bott_webhook.initialize_authorized_users()
-        load_vip_topics()
-
-        print(f"[STARTUP] VIP + topics initialisés.")
-    except Exception as e:
-        print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
-
-
-
-# === TEST STAFF FIN 
 
 # === 221097 DEBUT
 app.include_router(stripe_router)
