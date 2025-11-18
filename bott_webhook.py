@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
-from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
+from middlewares.payment_filter import PaymentFilterMiddleware
 from vip_topics import is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
 from bott_webhook import authorized_users
 from vip_topics import update_vip_info
@@ -378,7 +378,6 @@ async def handle_start(message: types.Message):
             # Paiement validé
             paiements_recents[montant].remove(paiements_valides[0])
             authorized_users.add(user_id)
-            reset_free_quota(user_id)
 
             # Si un contenu était en attente → on le livre
             if user_id in contenus_en_attente:
@@ -452,7 +451,6 @@ async def handle_start(message: types.Message):
     if param == "vipcdan":
         # 1) On marque le user comme VIP côté bot
         authorized_users.add(user_id)
-        reset_free_quota(user_id)
 
         # 2) On crée / récupère le topic VIP pour ce client
         try:
