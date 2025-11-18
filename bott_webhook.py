@@ -20,11 +20,6 @@ from vip_topics import update_vip_info
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
 
 
-
-# admin_id -> user_id pour lequel il est en train d'écrire une note
-pending_notes = {}
-
-
 # map (chat_id, message_id) -> chat_id du client
 pending_replies = {}
 
@@ -920,34 +915,49 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
 
 # 1. code pour le bouton annoter début
 
+# état global
+pending_notes = {}  # admin_id -> user_id
+
+
 @dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
 async def handle_annoter_vip(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
 
-    # On vérifie que ça vient bien du STAFF_GROUP
+    # On s'assure que le bouton vient bien du STAFF_GROUP
     if callback_query.message.chat.id != STAFF_GROUP_ID:
         await callback_query.answer("Action réservée au staff.", show_alert=True)
         return
 
+    # Récupère le user_id depuis la callback
     try:
         user_id = int(callback_query.data.split("_", 1)[1])
     except Exception:
         await callback_query.answer("Données invalides.", show_alert=True)
         return
 
+    # On récupère les infos VIP (et surtout topic_id) sans rien changer
+    info = update_vip_info(user_id)  # note=None, admin_id=None => juste retour du dict
+    topic_id = info.get("topic_id")
+
+    if not topic_id:
+        await callback_query.answer("Impossible de retrouver le topic VIP.", show_alert=True)
+        return
+
     # On enregistre que cet admin est en train d'écrire une note pour ce user_id
     pending_notes[admin_id] = user_id
 
-    await callback_query.answer()  # ferme le petit loader
+    await callback_query.answer()  # ferme le loader
 
-    # ⬇️ ICI : on enlève message_thread_id qui casse tout
+    # 🔥 On envoie le message DANS LE BON TOPIC grâce à topic_id, sans utiliser message.message_thread_id
     await bot.send_message(
         chat_id=STAFF_GROUP_ID,
+        message_thread_id=topic_id,
         text=(
-            f"📝 Envoie maintenant ta note pour le client {user_id} dans ce groupe.\n"
+            f"📝 Envoie maintenant ta note pour le client {user_id} dans ce topic.\n"
             "➡️ Le prochain message que tu écris ici sera enregistré comme NOTE."
         )
     )
+
 
 
 # 1. code pour le bouton annoter fin
@@ -961,7 +971,7 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
 async def handle_staff_group_message(message: types.Message):
     admin_id = message.from_user.id
 
-    # Si cet admin n'est pas en mode "note", on ignore
+    # Si cet admin n'est pas en mode "écriture de note", on ignore
     if admin_id not in pending_notes:
         return
 
@@ -972,7 +982,10 @@ async def handle_staff_group_message(message: types.Message):
         await message.reply("❌ Note vide, rien n'a été enregistré.")
         return
 
-    # On met la note à jour
+    # Log debug utile
+    print(f"[NOTES] Note reçue pour user_id={user_id} par admin_id={admin_id} : {note_text}")
+
+    # On met la note à jour dans vip_topics
     info = update_vip_info(user_id, note=note_text)
 
     topic_id = info.get("topic_id")
@@ -996,6 +1009,7 @@ async def handle_staff_group_message(message: types.Message):
         InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
     )
 
+    # Mise à jour du panneau dans le topic (on connaît déjà chat_id + message_id)
     await bot.edit_message_text(
         chat_id=STAFF_GROUP_ID,
         message_id=panel_message_id,
@@ -1003,6 +1017,7 @@ async def handle_staff_group_message(message: types.Message):
         reply_markup=kb
     )
 
+    # Petite confirmation dans le topic staff
     await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
 
 
