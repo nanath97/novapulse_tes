@@ -976,14 +976,21 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from vip_topics import update_vip_info
 
 
-@dp.message_handler(lambda m: m.chat.id == STAFF_GROUP_ID)
-async def handle_staff_group_message(message: types.Message):
+@dp.message_handler()
+async def handle_staff_note_if_needed(message: types.Message):
     admin_id = message.from_user.id
 
-    # Si cet admin n'est pas en mode "écriture de note", on ignore
+    # DEBUG pour comprendre ce qui se passe
+    print(
+        f"[NOTES DEBUG] message from admin_id={admin_id}, chat_id={message.chat.id}, "
+        f"pending_notes={pending_notes}, STAFF_GROUP_ID={STAFF_GROUP_ID}"
+    )
+
+    # Si cet admin n'est pas en mode "note", on ne fait rien : on laisse les autres handlers bosser
     if admin_id not in pending_notes:
         return
 
+    # À partir d'ici, ON PREND LA MAIN : c'est une note, point.
     user_id = pending_notes.pop(admin_id)
     note_text = (message.text or "").strip()
 
@@ -993,7 +1000,6 @@ async def handle_staff_group_message(message: types.Message):
 
     print(f"[NOTES] Note reçue pour user_id={user_id} par admin_id={admin_id} : {note_text}")
 
-    # Mise à jour de la note
     info = update_vip_info(user_id, note=note_text)
 
     topic_id = info.get("topic_id")
@@ -1025,6 +1031,7 @@ async def handle_staff_group_message(message: types.Message):
     )
 
     await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
+
 
 
 
