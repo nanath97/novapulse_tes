@@ -6,56 +6,39 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list  # Import de la ban_list
 
 import asyncio
-import time  # pour la fenêtre glissante
+import time
 import os
 
+# IDs
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+DIRECTEUR_ID = int(os.getenv("DIRECTEUR_ID", "0"))
+STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-# Ces IDs DOIVENT être les mêmes que dans bott_webhook / Render
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))          # Admin vendeur (instance)
-DIRECTEUR_ID = int(os.getenv("DIRECTEUR_ID", "0"))  # Toi (si tu veux être exclu aussi)
-STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))  # Supergroupe staff / topics
-
-
-# ✅ Liste d'IDs qui ne doivent JAMAIS être limités par les 5 messages gratuits
+# Utilisateurs jamais limités
 EXCLUDED_IDS = {
     ADMIN_ID,
     DIRECTEUR_ID,
-    7334072965,   # Ton ID perso (Nathan) → adapte si besoin
-    1788641757,   # ID de l'admin vendeur spécifique à ce bot → garde-le si utile
+    7334072965,   # Ton ID perso (Nathan)
+    1788641757,   # ID admin vendeur
 }
 
-
-# Boutons de ton ReplyKeyboard qui NE doivent PAS être comptés comme messages gratuits
+# Boutons autorisés (ReplyKeyboard)
 BOUTONS_AUTORISES = [
     "🔞 Voir le contenu du jour... tout en jouant 🎰",
     "✨Discuter en tant que VIP",
 ]
 
-# ===== Paramètres "messages gratuits" =====
-FREE_MSGS_LIMIT = 5                          # nombre de messages gratuits
-FREE_MSGS_WINDOW_SECONDS = 24 * 3600         # fenêtre glissante de 24h
-SHOW_REMAINING_HINT = True                   # afficher "X/5 utilisés" au fil de l'eau
-free_msgs_state = {}                         # user_id -> {"count": int, "window_start": float, "last": float}
-
-# Lien VIP (existant)
+# Lien VIP
 VIP_URL = "https://buy.stripe.com/5kQ9AS60J2ET9wxfi57AI0W"
 
-# ===== Anti-doublon par message =====
-# clé = (chat_id, message_id) → timestamp
+# Anti-doublon
 _processed_keys = {}
-_PROCESSED_TTL = 60  # secondes
-
+_PROCESSED_TTL = 60
 
 def _prune_processed(now: float):
-    # Nettoyage simple pour éviter l'accumulation en mémoire
     for k, ts in list(_processed_keys.items()):
         if now - ts > _PROCESSED_TTL:
             del _processed_keys[k]
-
-
-# Helper : à appeler quand un user devient VIP pour nettoyer son compteur
-def reset_free_quota(user_id: int):
-    free_msgs_state.pop(user_id, None)
 
 
 class PaymentFilterMiddleware(BaseMiddleware):
@@ -67,23 +50,14 @@ class PaymentFilterMiddleware(BaseMiddleware):
         user_id = message.from_user.id
         chat = message.chat
 
-        # DEBUG (facultatif, mais utile)
-        print(
-            f"[PAYMENT_MW] from user_id={user_id}, chat_id={chat.id}, "
-            f"chat_type={chat.type}, ADMIN_ID={ADMIN_ID}, "
-            f"DIRECTEUR_ID={DIRECTEUR_ID}, EXCLUDED_IDS={EXCLUDED_IDS}"
-        )
-
-        # 0) Staff / admins exclus de TOUT quota
+        # Admins / staff jamais bloqués
         if user_id in EXCLUDED_IDS:
             return
 
-        # 1) Le filtre "5 messages" NE s'applique QUE dans les MP client ↔ bot
-        #    → groupes / supergroupes / topics = ignorés
+        # Le blocage s'applique uniquement en privé
         if chat.type != "private":
             return
 
-        # 2) Anti-doublon par message
         now = time.time()
         _prune_processed(now)
         key = (chat.id, message.message_id)
@@ -91,82 +65,55 @@ class PaymentFilterMiddleware(BaseMiddleware):
             return
         _processed_keys[key] = now
 
-        # 3) Bannis → suppression + message d’info
+        # Ban permanent
         for admin_id, clients_bannis in ban_list.items():
             if user_id in clients_bannis:
                 try:
                     await message.delete()
-                except Exception as e:
-                    print(f"Erreur suppression message banni : {e}")
-                try:
-                    await message.answer("🚫 Tu as été banni, tu ne peux plus envoyer de messages.")
-                except Exception as e:
-                    print(f"Erreur envoi message banni : {e}")
+                except:
+                    pass
+                await message.answer("🚫 Tu as été banni, tu ne peux plus envoyer de messages.")
                 raise CancelHandler()
 
-        # 4) Si ce n’est pas du texte → on ne compte pas (pas de quota sur les médias)
-        if message.content_type != types.ContentType.TEXT:
-            return
+        text = (message.text or "").strip() if message.content_type == types.ContentType.TEXT else ""
 
-        text = (message.text or "").strip()
-
-        # 5) Autoriser /start
+        # Autoriser /start
         if text.startswith("/start"):
             return
 
-        # 6) Autoriser les boutons prédéfinis (ReplyKeyboard)
+        # Autoriser boutons ReplyKeyboard
         for b in BOUTONS_AUTORISES:
             if text.startswith(b):
                 return
 
-        # 7) VIP → aucune limite
-        if user_id in self.authorized_users:
+        # Autoriser liens admin dans le staff
+        if user_id == ADMIN_ID and message.text:
+            if lien_non_autorise(message.text):
+                try:
+                    await message.delete()
+                    await message.answer("🚫 Seuls les liens autorisés sont acceptés.")
+                except:
+                    pass
+                raise CancelHandler()
             return
 
-        # =========================
-        # 🚫 NON-VIP EN MP :
-        #    5 messages gratuits / 24h, puis paywall VIP
-        # =========================
-        state = free_msgs_state.get(user_id)
+        # 🔥 Règle finale : SEULS LES VIP peuvent envoyer des messages
+        if user_id not in self.authorized_users:    # NON-VIP
+            try:
+                await message.delete()
+            except:
+                pass
 
-        # Reset si première fois OU fenêtre expirée
-        if (not state) or (now - state.get("window_start", 0) > FREE_MSGS_WINDOW_SECONDS):
-            state = {"count": 0, "window_start": now}
+            kb = InlineKeyboardMarkup().add(
+                InlineKeyboardButton("⭐ Devenir membre VIP", url=VIP_URL)
+            )
 
-        # Incrémenter pour CE message
-        state["count"] += 1
-        state["last"] = now
-        free_msgs_state[user_id] = state
+            await message.answer(
+                "Désolée mon coeur, mais pour discuter librement avec moi, tu dois être un vip ! "
+                "Pour valider ton accès, tu n'as qu'à cliquer sur le lien juste ici ",
+                reply_markup=kb
+            )
+            raise CancelHandler()
 
-        if state["count"] <= FREE_MSGS_LIMIT:
-            # Petit rappel "X/5"
-            if SHOW_REMAINING_HINT:
-                remaining = FREE_MSGS_LIMIT - state["count"]
-                hint = (
-                    f"💬 Messages gratuits utilisés ({state['count']}/{FREE_MSGS_LIMIT})."
-                    f"{' Il t’en reste ' + str(remaining) + '.' if remaining > 0 else ' Tu viens d’utiliser le dernier 😉'}"
-                )
-                asyncio.create_task(
-                    message.bot.send_message(
-                        chat_id=chat.id,
-                        text=hint,
-                        reply_to_message_id=message.message_id
-                    )
-                )
-            # laisser passer vers les handlers normaux
-            return
-
-        # Quota dépassé → push VIP + blocage
-        pay_kb = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("💎 Deviens VIP", url=VIP_URL)
-        )
-        await message.bot.send_message(
-            chat_id=chat.id,
-            text=(
-                "🚪 Tu as utilisé tes 5 messages gratuits.\n"
-                "Pour continuer à discuter librement et recevoir des réponses prioritaires, "
-                "rejoins mon VIP 💕."
-            ),
-            reply_markup=pay_kb
-        )
-        raise CancelHandler()
+        # Si VIP → on laisse passer normalement
+        return
