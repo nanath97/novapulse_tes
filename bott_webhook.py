@@ -12,10 +12,18 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware, reset_free_quota
 from vip_topics import is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
+from bott_webhook import authorized_users
+from vip_topics import update_vip_info
 
 
 
 dp.middleware.setup(PaymentFilterMiddleware(authorized_users))
+
+
+
+# admin_id -> user_id pour lequel il est en train d'écrire une note
+pending_notes = {}
+
 
 # map (chat_id, message_id) -> chat_id du client
 pending_replies = {}
@@ -855,6 +863,154 @@ async def relay_from_client(message: types.Message):
     except Exception as e:
         print(f"❌ Erreur transfert message VIP vers topic : {e}")
 
+
+# 1. code pour le bouton prendre en charge début
+
+@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
+async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
+    admin_id = callback_query.from_user.id
+
+    # 1. Sécurité : uniquement les admins peuvent cliquer
+    if admin_id not in authorized_users:
+        await callback_query.answer("Tu n'es pas autorisé à prendre en charge ce VIP.", show_alert=True)
+        return
+
+    try:
+        user_id = int(callback_query.data.split("_", 1)[1])
+    except Exception:
+        await callback_query.answer("Données invalides.", show_alert=True)
+        return
+
+    # 2. On met à jour l'admin en charge dans vip_topics
+    admin_name = callback_query.from_user.username or callback_query.from_user.first_name or str(admin_id)
+    info = update_vip_info(user_id, admin_id=admin_id, admin_name=admin_name)
+
+    topic_id = info.get("topic_id")
+    panel_message_id = info.get("panel_message_id")
+    note = info.get("note") or "Aucune note"
+
+    if not topic_id or not panel_message_id:
+        await callback_query.answer("Impossible de retrouver le panneau VIP.", show_alert=True)
+        return
+
+    # 3. On reconstruit le texte du panneau
+    panel_text = (
+        "🧐 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user_id}\n"
+        f"📒 Notes : {note}\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+
+    # 4. On reconstruit le clavier avec les mêmes callbacks
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
+
+    # 5. On édite le panneau dans le topic
+    await bot.edit_message_text(
+        chat_id=STAFF_GROUP_ID,
+        message_id=panel_message_id,
+        text=panel_text,
+        reply_markup=kb
+    )
+
+    await callback_query.answer("VIP pris en charge ✅", show_alert=False)
+
+# 1. code pour le bouton prendre en charge fin
+
+# 1. code pour le bouton annoter début
+
+@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
+async def handle_annoter_vip(callback_query: types.CallbackQuery):
+    admin_id = callback_query.from_user.id
+
+    if admin_id not in authorized_users:
+        await callback_query.answer("Tu n'es pas autorisé à annoter ce VIP.", show_alert=True)
+        return
+
+    try:
+        user_id = int(callback_query.data.split("_", 1)[1])
+    except Exception:
+        await callback_query.answer("Données invalides.", show_alert=True)
+        return
+
+    # On passe en "mode note" pour cet admin
+    pending_notes[admin_id] = user_id
+
+    await callback_query.answer()  # fermer le loader
+
+    # Message dans le topic staff pour guider l'admin
+    await bot.send_message(
+        chat_id=STAFF_GROUP_ID,
+        message_thread_id=callback_query.message.message_thread_id,
+        text=(
+            f"📝 Envoie maintenant ta note pour le client {user_id} dans ce topic.\n"
+            "➡️ Le prochain message que tu écris ici sera enregistré comme NOTE."
+        )
+    )
+
+# 1. code pour le bouton annoter fin
+
+
+
+# 1. code pour le enregistrer la note début
+
+
+@dp.message_handler(lambda m: m.chat.id == STAFF_GROUP_ID)
+async def handle_staff_group_message(message: types.Message):
+    admin_id = message.from_user.id
+
+    # Si cet admin n'est pas en mode "écriture de note", on ne fait rien
+    if admin_id not in pending_notes:
+        return
+
+    user_id = pending_notes.pop(admin_id)
+    note_text = (message.text or "").strip()
+
+    if not note_text:
+        await message.reply("❌ Note vide, rien n'a été enregistré.")
+        return
+
+    # 1. On met à jour la note dans vip_topics
+    info = update_vip_info(user_id, note=note_text)
+
+    topic_id = info.get("topic_id")
+    panel_message_id = info.get("panel_message_id")
+    admin_name = info.get("admin_name") or message.from_user.username or message.from_user.first_name or str(admin_id)
+
+    if not topic_id or not panel_message_id:
+        await message.reply("⚠️ Impossible de retrouver le panneau VIP pour ce client.")
+        return
+
+    # 2. On reconstruit le texte du panneau
+    panel_text = (
+        "🧐 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user_id}\n"
+        f"📒 Notes : {note_text}\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
+
+    # 3. On met à jour le panneau
+    await bot.edit_message_text(
+        chat_id=STAFF_GROUP_ID,
+        message_id=panel_message_id,
+        text=panel_text,
+        reply_markup=kb
+    )
+
+    # 4. Confirmation visuelle dans le topic staff
+    await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
+
+
+# 1. code pour le enregistrer la note fin 
 
 
 # ========== CHOIX DANS LE MENU INLINE ==========
