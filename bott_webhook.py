@@ -186,67 +186,6 @@ async def handle_stat(message: types.Message):
         await bot.send_message(message.chat.id, "❌ Une erreur est survenue lors de la récupération des statistiques.")
 
 
-@dp.message_handler()
-async def handle_staff_note_if_needed(message: types.Message):
-    admin_id = message.from_user.id
-
-    # DEBUG pour voir ce qu'il se passe réellement
-    print(
-        f"[NOTES DEBUG] message from admin_id={admin_id}, chat_id={message.chat.id}, "
-        f"pending_notes={pending_notes}"
-    )
-
-    # Si cet admin n'est pas en mode "note", on laisse les autres handlers faire leur vie
-    if admin_id not in pending_notes:
-        return
-
-    # À partir d'ici : ON PREND LA MAIN. Plus aucun autre handler ne doit répondre.
-    user_id = pending_notes.pop(admin_id)
-    note_text = (message.text or "").strip()
-
-    if not note_text:
-        await message.reply("❌ Note vide, rien n'a été enregistré.")
-        # Et on arrête la propagation quand même
-        raise CancelHandler()
-
-    print(f"[NOTES] Note reçue pour user_id={user_id} par admin_id={admin_id} : {note_text}")
-
-    info = update_vip_info(user_id, note=note_text)
-
-    topic_id = info.get("topic_id")
-    panel_message_id = info.get("panel_message_id")
-    admin_name = info.get("admin_name") or message.from_user.username or message.from_user.first_name or str(admin_id)
-
-    if not topic_id or not panel_message_id:
-        await message.reply("⚠️ Impossible de retrouver le panneau VIP pour ce client.")
-        raise CancelHandler()
-
-    panel_text = (
-        "🧐 PANEL DE CONTRÔLE VIP\n\n"
-        f"👤 Client : {user_id}\n"
-        f"📒 Notes : {note_text}\n"
-        f"👤 Admin en charge : {admin_name}"
-    )
-
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
-        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
-    )
-
-    await bot.edit_message_text(
-        chat_id=STAFF_GROUP_ID,
-        message_id=panel_message_id,
-        text=panel_text,
-        reply_markup=kb
-    )
-
-    await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
-
-    # 🔥 Très important : on empêche les autres handlers de traiter ce message
-    raise CancelHandler()
-
-
 
 # DEBUT de la fonction du proprietaire ! Ne pas toucher
 
@@ -1030,7 +969,65 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
 
 # 1. code pour le enregistrer la note début
 
+@dp.message_handler()
+async def handle_staff_note_if_needed(message: types.Message):
+    admin_id = message.from_user.id
 
+    # DEBUG pour voir ce qu'il se passe réellement
+    print(
+        f"[NOTES DEBUG] message from admin_id={admin_id}, chat_id={message.chat.id}, "
+        f"pending_notes={pending_notes}"
+    )
+
+    # Si cet admin n'est pas en mode "note", on laisse les autres handlers faire leur vie
+    if admin_id not in pending_notes:
+        return
+
+    # À partir d'ici : ON PREND LA MAIN. Plus aucun autre handler ne doit répondre.
+    user_id = pending_notes.pop(admin_id)
+    note_text = (message.text or "").strip()
+
+    if not note_text:
+        await message.reply("❌ Note vide, rien n'a été enregistré.")
+        # Et on arrête la propagation quand même
+        raise CancelHandler()
+
+    print(f"[NOTES] Note reçue pour user_id={user_id} par admin_id={admin_id} : {note_text}")
+
+    info = update_vip_info(user_id, note=note_text)
+
+    topic_id = info.get("topic_id")
+    panel_message_id = info.get("panel_message_id")
+    admin_name = info.get("admin_name") or message.from_user.username or message.from_user.first_name or str(admin_id)
+
+    if not topic_id or not panel_message_id:
+        await message.reply("⚠️ Impossible de retrouver le panneau VIP pour ce client.")
+        raise CancelHandler()
+
+    panel_text = (
+        "🧐 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user_id}\n"
+        f"📒 Notes : {note_text}\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
+
+    await bot.edit_message_text(
+        chat_id=STAFF_GROUP_ID,
+        message_id=panel_message_id,
+        text=panel_text,
+        reply_markup=kb
+    )
+
+    await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
+
+    # 🔥 Très important : on empêche les autres handlers de traiter ce message
+    raise CancelHandler()
 
 
 # 1. code pour le enregistrer la note fin 
