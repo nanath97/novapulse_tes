@@ -556,6 +556,78 @@ async def handle_start(message: types.Message):
     except Exception as e:
         print(f"Erreur envoi directeur : {e}")
 
+# TEST A SUPPRIMER DEBUT
+
+@dp.message_handler(
+    lambda m: m.chat.id == STAFF_GROUP_ID and m.from_user.id in pending_notes,
+    content_types=[types.ContentType.TEXT]
+)
+async def handle_vip_note(message: types.Message):
+    admin_id = message.from_user.id
+
+    # DEBUG : tu verras ça dans Render si besoin
+    print(f"[NOTES] handle_vip_note triggered for admin_id={admin_id}, chat_id={message.chat.id}")
+    print(f"[NOTES] pending_notes = {pending_notes}")
+
+    # Récupérer le VIP concerné et enlever le mode "note"
+    vip_user_id = pending_notes.pop(admin_id, None)
+    if not vip_user_id:
+        # cas bizarre : on était censé être en mode note mais le dict est vide
+        return
+
+    note_text = (message.text or "").strip()
+    if not note_text:
+        await message.reply("❌ Note vide, rien n'a été enregistré.")
+        raise CancelHandler()
+
+    print(f"[NOTES] Note reçue pour VIP user_id={vip_user_id} par admin_id={admin_id} : {note_text}")
+
+    # Mise à jour des infos VIP
+    info = update_vip_info(vip_user_id, note=note_text)
+
+    panel_message_id = info.get("panel_message_id")
+    admin_name = (
+        info.get("admin_name")
+        or message.from_user.username
+        or message.from_user.first_name
+        or str(admin_id)
+    )
+
+    if not panel_message_id:
+        await message.reply("⚠️ Impossible de retrouver le panneau VIP pour ce client.")
+        raise CancelHandler()
+
+    panel_text = (
+        "🧐 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {vip_user_id}\n"
+        f"📒 Notes : {note_text}\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{vip_user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{vip_user_id}")
+    )
+
+    # On met à jour le panneau dans le STAFF_GROUP
+    await bot.edit_message_text(
+        chat_id=STAFF_GROUP_ID,
+        message_id=panel_message_id,
+        text=panel_text,
+        reply_markup=kb
+    )
+
+    # Petite confirmation dans le topic
+    await message.reply("✅ Note enregistrée et panneau mis à jour.", reply=False)
+
+    # 🔥 Très important : empêche les autres handlers (dont /env) de traiter ce message
+    raise CancelHandler()
+
+
+# TEST A SUPPRIMER FIN
+
+
 
 # Message et média personnel avec lien 
 
