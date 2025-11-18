@@ -870,9 +870,9 @@ async def relay_from_client(message: types.Message):
 async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
 
-    # 1. Sécurité : uniquement les admins peuvent cliquer
-    if admin_id not in authorized_users:
-        await callback_query.answer("Tu n'es pas autorisé à prendre en charge ce VIP.", show_alert=True)
+    # On vérifie que le bouton est cliqué depuis le STAFF_GROUP (le panneau est dans ce group)
+    if callback_query.message.chat.id != STAFF_GROUP_ID:
+        await callback_query.answer("Action réservée au staff.", show_alert=True)
         return
 
     try:
@@ -881,8 +881,8 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
         await callback_query.answer("Données invalides.", show_alert=True)
         return
 
-    # 2. On met à jour l'admin en charge dans vip_topics
     admin_name = callback_query.from_user.username or callback_query.from_user.first_name or str(admin_id)
+
     info = update_vip_info(user_id, admin_id=admin_id, admin_name=admin_name)
 
     topic_id = info.get("topic_id")
@@ -893,7 +893,6 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
         await callback_query.answer("Impossible de retrouver le panneau VIP.", show_alert=True)
         return
 
-    # 3. On reconstruit le texte du panneau
     panel_text = (
         "🧐 PANEL DE CONTRÔLE VIP\n\n"
         f"👤 Client : {user_id}\n"
@@ -901,14 +900,12 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
         f"👤 Admin en charge : {admin_name}"
     )
 
-    # 4. On reconstruit le clavier avec les mêmes callbacks
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
         InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
     )
 
-    # 5. On édite le panneau dans le topic
     await bot.edit_message_text(
         chat_id=STAFF_GROUP_ID,
         message_id=panel_message_id,
@@ -918,6 +915,7 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
 
     await callback_query.answer("VIP pris en charge ✅", show_alert=False)
 
+
 # 1. code pour le bouton prendre en charge fin
 
 # 1. code pour le bouton annoter début
@@ -926,8 +924,9 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
 async def handle_annoter_vip(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
 
-    if admin_id not in authorized_users:
-        await callback_query.answer("Tu n'es pas autorisé à annoter ce VIP.", show_alert=True)
+    # Pareil : on vérifie que ça vient bien du STAFF_GROUP
+    if callback_query.message.chat.id != STAFF_GROUP_ID:
+        await callback_query.answer("Action réservée au staff.", show_alert=True)
         return
 
     try:
@@ -936,12 +935,10 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
         await callback_query.answer("Données invalides.", show_alert=True)
         return
 
-    # On passe en "mode note" pour cet admin
     pending_notes[admin_id] = user_id
 
-    await callback_query.answer()  # fermer le loader
+    await callback_query.answer()
 
-    # Message dans le topic staff pour guider l'admin
     await bot.send_message(
         chat_id=STAFF_GROUP_ID,
         message_thread_id=callback_query.message.message_thread_id,
