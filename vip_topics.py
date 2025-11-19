@@ -160,8 +160,23 @@ async def ensure_topic_for_vip(user: types.User) -> int:
             records = r.json().get("records", [])
 
             if not records:
-                print(f"[VIP_TOPICS] Aucun enregistrement VIP trouvé dans Airtable pour user {user_id} pour y mettre Topic ID.")
+                # Aucun VIP trouvé pour cet ID → on crée une ligne dédiée au Topic ID
+                data = {
+                    "fields": {
+                        "ID Telegram": str(user_id),
+                        "Type acces": "VIP",
+                        "Montant": 0,
+                        "Contenu": "Création Topic VIP automatique",
+                        "Topic ID": topic_id,
+                    }
+                }
+                pr = requests.post(url_base, json=data, headers=headers)
+                if pr.status_code != 200:
+                    print(f"[VIP_TOPICS] Erreur POST Topic ID Airtable pour user {user_id}: {pr.text}")
+                else:
+                    print(f"[VIP_TOPICS] Topic ID {topic_id} CRÉÉ dans Airtable pour user {user_id}")
             else:
+                # On met à jour toutes les lignes VIP existantes pour ce user
                 for rec in records:
                     rec_id = rec["id"]
                     patch_url = f"{url_base}/{rec_id}"
