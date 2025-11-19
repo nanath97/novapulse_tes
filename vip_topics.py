@@ -167,7 +167,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                         "Type acces": "VIP",
                         "Montant": 0,
                         "Contenu": "Création Topic VIP automatique",
-                        "Topic ID": topic_id,
+                        "Topic ID": str(topic_id),  # 🔑 en string
                     }
                 }
                 pr = requests.post(url_base, json=data, headers=headers)
@@ -180,7 +180,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                 for rec in records:
                     rec_id = rec["id"]
                     patch_url = f"{url_base}/{rec_id}"
-                    data = {"fields": {"Topic ID": topic_id}}
+                    data = {"fields": {"Topic ID": str(topic_id)}}  # 🔑 en string
                     pr = requests.patch(patch_url, json=data, headers=headers)
                     if pr.status_code != 200:
                         print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
@@ -285,19 +285,19 @@ async def load_vip_topics_from_airtable():
                 continue
 
             try:
-                topic_id = int(topic_id)
-                telegram_id = int(telegram_id)
+                topic_id_int = int(topic_id)
+                telegram_id_int = int(telegram_id)
             except:
                 continue
 
-            _user_topics[telegram_id] = {
-                "topic_id": topic_id,
+            _user_topics[telegram_id_int] = {
+                "topic_id": topic_id_int,
                 "panel_message_id": None,
                 "note": "Aucune note",
                 "admin_id": None,
                 "admin_name": "Aucun",
             }
-            _topic_to_user[topic_id] = telegram_id
+            _topic_to_user[topic_id_int] = telegram_id_int
             loaded += 1
 
         print(f"[VIP_TOPICS] {loaded} Topic IDs chargés depuis Airtable.")
