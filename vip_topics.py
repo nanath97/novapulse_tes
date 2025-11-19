@@ -186,3 +186,52 @@ def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_
     _user_topics[user_id] = data
     save_vip_topics()
     return data
+
+
+
+# ========= IMPORT TOPICS DEPUIS AIRTABLE TOPIC ID DEBUT =========
+import os, requests
+
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+BASE_ID = os.getenv("BASE_ID")
+TABLE_NAME = os.getenv("TABLE_NAME")
+
+async def load_vip_topics_from_airtable():
+    """
+    Charge dans _user_topics et _topic_to_user tous les Topic ID enregistrés dans Airtable
+    pour les utilisateurs ayant Type acces = VIP.
+    """
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    params = {"filterByFormula": "{Type acces}='VIP'"}
+
+    try:
+        resp = requests.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        records = resp.json().get("records", [])
+
+        loaded = 0
+        for rec in records:
+            f = rec.get("fields", {})
+            topic_id = f.get("Topic ID")
+            telegram_id = f.get("ID Telegram")
+
+            if not topic_id or not telegram_id:
+                continue
+
+            try:
+                topic_id = int(topic_id)
+                telegram_id = int(telegram_id)
+            except:
+                continue
+
+            _user_topics[telegram_id] = {"topic_id": topic_id}
+            _topic_to_user[topic_id] = telegram_id
+            loaded += 1
+
+        print(f"[VIP_TOPICS] {loaded} Topic IDs chargés depuis Airtable.")
+
+    except Exception as e:
+        print(f"[VIP_TOPICS] Erreur import topics Airtable : {e}")
+
+# ========= IMPORT TOPICS DEPUIS AIRTABLE TOPIC ID FIN =========

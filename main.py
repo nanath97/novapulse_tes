@@ -32,6 +32,8 @@ async def telegram_webhook(request: Request):
 
 # === TEST STAFF DEBUT
 from vip_topics import load_vip_topics_from_disk
+from vip_topics import load_vip_topics_from_airtable
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -39,7 +41,7 @@ async def startup_event():
         bott_webhook.initialize_authorized_users
         
         load_vip_topics_from_disk()
-        await load_vip_topics()    # 👈 s’assure que ceux manquants sont créés
+        await load_vip_topics_from_airtable()  # 👈 s’assure que ceux manquants sont créés
 
         print(f"[STARTUP] VIP + topics initialisés.")
     except Exception as e:
