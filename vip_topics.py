@@ -10,7 +10,7 @@ from core import bot, authorized_users
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-# Fichier pour persister les topics (ancienne méthode, conservée en secours)
+# Fichier pour persister les topics (annotations, panneau, etc.)
 VIP_TOPICS_FILE = "vip_topics.json"
 
 # Mémoire en RAM :
@@ -29,11 +29,16 @@ TABLE_NAME = os.getenv("TABLE_NAME")
 def save_vip_topics():
     """
     Sauvegarde _user_topics dans le fichier JSON.
-    On garde cette persistance locale en secours.
+    Sert de persistance locale pour :
+      - topic_id (en secours)
+      - panel_message_id
+      - note
+      - admin_id
+      - admin_name
     """
     data = {str(user_id): d for user_id, d in _user_topics.items()}
     try:
-        with open(VIP_TOPICS_FILE, "w") as f:
+        with open(VIP_TOPICS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
         print(f"[VIP_TOPICS] Sauvegarde JSON : {len(data)} topics enregistrés.")
     except Exception as e:
@@ -42,22 +47,63 @@ def save_vip_topics():
 
 def load_vip_topics_from_disk():
     """
-    Ancienne fonction de chargement depuis le JSON.
-    Gardée pour compatibilité / secours.
+    Recharge depuis vip_topics.json UNIQUEMENT les infos d'annotation :
+        - panel_message_id
+        - note
+        - admin_id
+        - admin_name
+    Sans écraser les topic_id déjà chargés depuis Airtable.
+    Si un user_id n'existe pas encore en mémoire, on recrée une entrée propre.
     """
     try:
-        with open(VIP_TOPICS_FILE, "r") as f:
+        with open(VIP_TOPICS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            for user_id_str, d in data.items():
+
+        merged = 0
+
+        for user_id_str, d in data.items():
+            try:
                 user_id = int(user_id_str)
-                _user_topics[user_id] = d
-                if "topic_id" in d:
-                    _topic_to_user[d["topic_id"]] = user_id
-        print(f"[VIP_TOPICS] Chargement JSON : {len(_user_topics)} topics rechargés depuis le fichier.")
+            except Exception:
+                continue
+
+            existing = _user_topics.get(user_id)
+
+            if not existing:
+                # Cas : JSON connaît ce VIP mais Airtable n'a pas encore été chargé
+                existing = {
+                    "topic_id": d.get("topic_id"),
+                    "panel_message_id": d.get("panel_message_id"),
+                    "note": d.get("note", "Aucune note"),
+                    "admin_id": d.get("admin_id"),
+                    "admin_name": d.get("admin_name", "Aucun"),
+                }
+            else:
+                # On fusionne uniquement les infos d'annotation
+                if "panel_message_id" in d:
+                    existing["panel_message_id"] = d["panel_message_id"]
+                if "note" in d:
+                    existing["note"] = d["note"]
+                if "admin_id" in d:
+                    existing["admin_id"] = d["admin_id"]
+                if "admin_name" in d:
+                    existing["admin_name"] = d["admin_name"]
+
+            _user_topics[user_id] = existing
+
+            # On complète aussi la map inverse si on connaît le topic_id
+            topic_id = existing.get("topic_id")
+            if topic_id is not None:
+                _topic_to_user[topic_id] = user_id
+
+            merged += 1
+
+        print(f"[VIP_TOPICS] Annotations restaurées depuis JSON pour {merged} VIP(s).")
+
     except FileNotFoundError:
-        print("[VIP_TOPICS] Aucun fichier de topics à charger.")
+        print("[VIP_TOPICS] Aucun fichier vip_topics.json à charger (normal si première exécution).")
     except Exception as e:
-        print(f"[VIP_TOPICS] Erreur au chargement des topics JSON : {e}")
+        print(f"[VIP_TOPICS] Erreur au chargement des annotations depuis JSON : {e}")
 
 
 async def ensure_topic_for_vip(user: types.User) -> int:
@@ -138,7 +184,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         "admin_id": None,
         "admin_name": "Aucun",
     }
-    # Sauvegarde JSON (ancienne méthode, gardée pour l'instant)
+    # Sauvegarde JSON
     save_vip_topics()
 
     # ===== Enregistrement / mise à jour du Topic ID dans Airtable =====
@@ -166,7 +212,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                         "Type acces": "VIP",
                         "Montant": 0,
                         "Contenu": "Création Topic VIP automatique",
-                        "Topic ID": str(topic_id),  # 🔑 en string
+                        "Topic ID": str(topic_id),  # en string
                     }
                 }
                 pr = requests.post(url_base, json=data, headers=headers)
@@ -179,7 +225,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                 for rec in records:
                     rec_id = rec["id"]
                     patch_url = f"{url_base}/{rec_id}"
-                    data = {"fields": {"Topic ID": str(topic_id)}}  # 🔑 en string
+                    data = {"fields": {"Topic ID": str(topic_id)}}  # en string
                     pr = requests.patch(patch_url, json=data, headers=headers)
                     if pr.status_code != 200:
                         print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
@@ -211,11 +257,11 @@ def get_panel_message_id_by_user(user_id: int):
 
 async def load_vip_topics():
     """
-    Version async de chargement depuis le JSON.
-    Gardée pour compatibilité si appelée ailleurs.
+    Ancienne version async de chargement depuis le JSON (plus vraiment utilisée).
+    Gardée pour compatibilité éventuelle.
     """
     try:
-        with open(VIP_TOPICS_FILE, "r") as f:
+        with open(VIP_TOPICS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             for user_id_str, d in data.items():
                 if "topic_id" in d:
@@ -249,7 +295,7 @@ def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_
         data["admin_name"] = admin_name
 
     _user_topics[user_id] = data
-    # On garde la sauvegarde JSON pour l’instant
+    # Sauvegarde JSON à chaque modification
     save_vip_topics()
     return data
 
@@ -286,7 +332,7 @@ async def load_vip_topics_from_airtable():
             try:
                 topic_id_int = int(topic_id)
                 telegram_id_int = int(telegram_id)
-            except:
+            except Exception:
                 continue
 
             _user_topics[telegram_id_int] = {
@@ -305,3 +351,62 @@ async def load_vip_topics_from_airtable():
         print(f"[VIP_TOPICS] Erreur import topics Airtable : {e}")
 
 # ========= FIN IMPORT TOPICS DEPUIS AIRTABLE =========
+
+
+async def restore_missing_panels():
+    """
+    Après chargement via Airtable + fusion JSON, recrée un panneau de contrôle
+    pour chaque VIP qui a un topic_id mais pas de panel_message_id.
+    Utilise la note et l'admin_name si disponibles.
+    """
+    restored = 0
+
+    for user_id, info in _user_topics.items():
+        topic_id = info.get("topic_id")
+        panel_message_id = info.get("panel_message_id")
+
+        if not topic_id:
+            continue
+        if panel_message_id:
+            # On suppose que le panneau existe encore
+            continue
+
+        note = info.get("note", "Aucune note")
+        admin_name = info.get("admin_name", "Aucun")
+
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+            InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+        )
+
+        panel_text = (
+            "🧐 PANEL DE CONTRÔLE VIP\n\n"
+            f"👤 Client : {user_id}\n"
+            f"📒 Notes : {note}\n"
+            f"👤 Admin en charge : {admin_name}"
+        )
+
+        try:
+            panel_res = await bot.request(
+                "sendMessage",
+                {
+                    "chat_id": STAFF_GROUP_ID,
+                    "text": panel_text,
+                    "message_thread_id": topic_id,
+                    "reply_markup": kb
+                }
+            )
+            new_panel_id = panel_res.get("message_id")
+            info["panel_message_id"] = new_panel_id
+            _user_topics[user_id] = info
+            restored += 1
+            print(f"[VIP_TOPICS] Panneau restauré pour user_id={user_id} dans topic_id={topic_id}, msg_id={new_panel_id}")
+        except Exception as e:
+            print(f"[VIP_TOPICS] Erreur restauration panneau de contrôle pour user_id={user_id} : {e}")
+
+    if restored > 0:
+        # On persiste les nouveaux panel_message_id
+        save_vip_topics()
+
+    print(f"[VIP_TOPICS] Panneaux restaurés pour {restored} VIP(s).")

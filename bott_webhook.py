@@ -619,16 +619,11 @@ async def handle_vip_note(message: types.Message):
 
     print(f"[NOTES] Note reçue pour VIP user_id={vip_user_id} par admin_id={admin_id} : {note_text}")
 
-    # Mise à jour des infos VIP
+    # Mise à jour des infos VIP (NOTE UNIQUEMENT)
     info = update_vip_info(vip_user_id, note=note_text)
 
     panel_message_id = info.get("panel_message_id")
-    admin_name = (
-        info.get("admin_name")
-        or message.from_user.username
-        or message.from_user.first_name
-        or str(admin_id)
-    )
+    admin_name = info.get("admin_name") or "Aucun"
 
     if not panel_message_id:
         await message.reply("⚠️ Impossible de retrouver le panneau VIP pour ce client.")
@@ -1034,43 +1029,51 @@ async def relay_from_client(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
 async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
-
-    # On vérifie que le bouton est cliqué depuis le STAFF_GROUP (le panneau est dans ce group)
-    if callback_query.message.chat.id != STAFF_GROUP_ID:
-        await callback_query.answer("Action réservée au staff.", show_alert=True)
-        return
+    data = callback_query.data  # ex: "prendre_8440217096"
 
     try:
-        user_id = int(callback_query.data.split("_", 1)[1])
+        vip_user_id = int(data.split("_", 1)[1])
     except Exception:
-        await callback_query.answer("Données invalides.", show_alert=True)
+        await callback_query.answer("ID VIP invalide.", show_alert=True)
         return
 
-    admin_name = callback_query.from_user.username or callback_query.from_user.first_name or str(admin_id)
+    # Déterminer le nom de l'admin
+    admin_name = (
+        callback_query.from_user.username
+        or callback_query.from_user.first_name
+        or str(admin_id)
+    )
 
-    info = update_vip_info(user_id, admin_id=admin_id, admin_name=admin_name)
+    print(f"[VIP] Admin {admin_id} prend en charge VIP {vip_user_id} ({admin_name})")
 
-    topic_id = info.get("topic_id")
+    # On met à jour les infos VIP (ADMIN UNIQUEMENT)
+    info = update_vip_info(
+        vip_user_id,
+        admin_id=admin_id,
+        admin_name=admin_name,
+    )
+
     panel_message_id = info.get("panel_message_id")
-    note = info.get("note") or "Aucune note"
+    note_text = info.get("note", "Aucune note")
 
-    if not topic_id or not panel_message_id:
-        await callback_query.answer("Impossible de retrouver le panneau VIP.", show_alert=True)
+    if not panel_message_id:
+        await callback_query.answer("Panneau introuvable pour ce VIP.", show_alert=True)
         return
 
     panel_text = (
         "🧐 PANEL DE CONTRÔLE VIP\n\n"
-        f"👤 Client : {user_id}\n"
-        f"📒 Notes : {note}\n"
+        f"👤 Client : {vip_user_id}\n"
+        f"📒 Notes : {note_text}\n"
         f"👤 Admin en charge : {admin_name}"
     )
 
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
-        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{vip_user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{vip_user_id}")
     )
 
+    # On met à jour le panneau
     await bot.edit_message_text(
         chat_id=STAFF_GROUP_ID,
         message_id=panel_message_id,
@@ -1078,7 +1081,8 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
         reply_markup=kb
     )
 
-    await callback_query.answer("VIP pris en charge ✅", show_alert=False)
+    await callback_query.answer("✅ Tu es maintenant en charge de ce VIP.")
+
 
 
 # 1. code pour le bouton prendre en charge fin

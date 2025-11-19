@@ -6,7 +6,8 @@ import os
 from core import bot, dp
 import bott_webhook
 from stripe_webhook import router as stripe_router
-from vip_topics import load_vip_topics_from_airtable
+from vip_topics import load_vip_topics_from_airtable, load_vip_topics_from_disk, restore_missing_panels
+
 
 load_dotenv()
 
@@ -28,15 +29,22 @@ async def telegram_webhook(request: Request):
 @app.on_event("startup")
 async def startup_event():
     try:
-        # Recharge les VIP dans authorized_users
+        # 1) Recharge les VIP dans authorized_users
         bott_webhook.initialize_authorized_users()
 
-        # Recharge les topics depuis Airtable
+        # 2) Recharge les Topic IDs depuis Airtable
         await load_vip_topics_from_airtable()
 
-        print("[STARTUP] VIP + topics initialisés.")
+        # 3) Recharge les annotations (note, admin, panel) depuis JSON
+        load_vip_topics_from_disk()
+
+        # 4) Recrée les panneaux manquants si besoin
+        await restore_missing_panels()
+
+        print("[STARTUP] VIP + topics + annotations initialisés.")
     except Exception as e:
         print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
+
 
 
 # Stripe webhook
