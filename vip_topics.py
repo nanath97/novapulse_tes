@@ -65,14 +65,15 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     """
     Vérifie / crée le topic VIP pour un utilisateur.
     - Si déjà en mémoire → renvoie le topic existant.
-    - Sinon → crée un topic, un panneau de contrôle, sauvegarde en JSON + Airtable.
+    - Sinon → crée un topic, un panneau de contrôle,
+      sauvegarde en JSON + enregistre le Topic ID dans Airtable.
     """
     user_id = user.id
     print(f"[VIP_TOPICS] ensure_topic_for_vip() appelé pour user_id={user_id}")
 
     # Topic déjà existant pour ce VIP en mémoire
     if user_id in _user_topics:
-        topic_id = _user_topics[user_id]["topic_id"]
+        topic_id = _user_topics[user_id].get("topic_id")
         print(f"[VIP_TOPICS] Topic déjà connu pour {user_id} -> {topic_id}")
         return topic_id
 
@@ -141,31 +142,35 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     # Sauvegarde JSON (ancienne méthode, gardée pour l'instant)
     save_vip_topics()
 
-    # ===== Enregistrement du Topic ID dans Airtable =====
+    # ===== Enregistrement / mise à jour du Topic ID dans Airtable =====
     try:
         if AIRTABLE_API_KEY and BASE_ID and TABLE_NAME:
-            url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
+            url_base = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
             headers = {
                 "Authorization": f"Bearer {AIRTABLE_API_KEY}",
                 "Content-Type": "application/json"
             }
-            # On cherche les lignes correspondant à ce user_id ET Type acces = VIP
+
+            # On cherche la/les lignes correspondant à ce user_id ET Type acces = VIP
             params = {
                 "filterByFormula": f"AND({{ID Telegram}} = '{user_id}', {{Type acces}} = 'VIP')"
             }
-            r = requests.get(url, headers=headers, params=params)
+            r = requests.get(url_base, headers=headers, params=params)
             r.raise_for_status()
             records = r.json().get("records", [])
 
-            for rec in records:
-                rec_id = rec["id"]
-                patch_url = f"{url}/{rec_id}"
-                data = {"fields": {"Topic ID": topic_id}}
-                pr = requests.patch(patch_url, json=data, headers=headers)
-                if pr.status_code != 200:
-                    print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
-                else:
-                    print(f"[VIP_TOPICS] Topic ID {topic_id} enregistré dans Airtable pour user {user_id}")
+            if not records:
+                print(f"[VIP_TOPICS] Aucun enregistrement VIP trouvé dans Airtable pour user {user_id} pour y mettre Topic ID.")
+            else:
+                for rec in records:
+                    rec_id = rec["id"]
+                    patch_url = f"{url_base}/{rec_id}"
+                    data = {"fields": {"Topic ID": topic_id}}
+                    pr = requests.patch(patch_url, json=data, headers=headers)
+                    if pr.status_code != 200:
+                        print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
+                    else:
+                        print(f"[VIP_TOPICS] Topic ID {topic_id} enregistré dans Airtable pour user {user_id}")
         else:
             print("[VIP_TOPICS] Variables Airtable manquantes, impossible d'enregistrer Topic ID.")
     except Exception as e:
