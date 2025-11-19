@@ -294,11 +294,18 @@ async def verifier_les_liens_uniquement(message: types.Message):
 
 # Fonction pour ajouter un paiement à Airtable 22 Changer l'adresse mail par celui de l'admin
 
-def log_to_airtable(pseudo, user_id, type_acces, montant, contenu="Paiement Telegram", email="vinteo.ac@gmail.com",):
+def log_to_airtable(
+    pseudo,
+    user_id,
+    type_acces,
+    montant,
+    contenu="Paiement Telegram",
+    email="vinteo.ac@gmail.com",
+):
     if not type_acces:
         type_acces = "Paiement"  # Par défaut pour éviter erreurs
 
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
+    url_base = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
@@ -306,6 +313,7 @@ def log_to_airtable(pseudo, user_id, type_acces, montant, contenu="Paiement Tele
 
     now = datetime.now()
 
+    # Champs communs qu'on veut toujours écrire / mettre à jour
     fields = {
         "Pseudo Telegram": pseudo or "-",
         "ID Telegram": str(user_id),
@@ -317,18 +325,50 @@ def log_to_airtable(pseudo, user_id, type_acces, montant, contenu="Paiement Tele
         "Mois": now.strftime("%Y-%m")
     }
 
-    data = {
-        "fields": fields
-    }
-
     try:
-        response = requests.post(url, json=data, headers=headers)
+        # 🔹 Cas particulier : accès VIP
+        if str(type_acces).lower() == "vip":
+            # On cherche la/les lignes VIP existantes pour ce user
+            params = {
+                "filterByFormula": f"AND({{ID Telegram}} = '{user_id}', {{Type acces}} = 'VIP')"
+            }
+            r = requests.get(url_base, headers=headers, params=params)
+            r.raise_for_status()
+            records = r.json().get("records", [])
+
+            if records:
+                # On choisit de préférence une ligne qui a déjà un Topic ID
+                rec_to_update = records[0]
+                for rec in records:
+                    if rec.get("fields", {}).get("Topic ID"):
+                        rec_to_update = rec
+                        break
+
+                rec_id = rec_to_update["id"]
+                patch_url = f"{url_base}/{rec_id}"
+
+                # ⚠️ Important : on n'envoie PAS "Topic ID" ici → Airtable le conserve tel quel
+                data = {"fields": fields}
+                response = requests.patch(patch_url, json=data, headers=headers)
+            else:
+                # Sécurité : si aucune ligne VIP n'existe (cas improbable),
+                # on crée une nouvelle ligne comme avant
+                data = {"fields": fields}
+                response = requests.post(url_base, json=data, headers=headers)
+
+        # 🔹 Tous les autres types d'accès (Paiement simple, groupé, etc.)
+        else:
+            data = {"fields": fields}
+            response = requests.post(url_base, json=data, headers=headers)
+
         if response.status_code != 200:
             print(f"❌ Erreur Airtable : {response.text}")
         else:
             print("✅ Paiement ajouté dans Airtable avec succès !")
+
     except Exception as e:
         print(f"Erreur lors de l'envoi à Airtable : {e}")
+
 
 
 # Création du clavier
