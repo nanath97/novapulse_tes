@@ -2,6 +2,7 @@
 
 import os
 import json
+import requests  # pour appeler l'API Airtable
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from core import bot
@@ -10,7 +11,7 @@ from bott_webhook import authorized_users
 # ID du supergroupe staff (forum) où se trouvent les topics VIP
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-# Fichier pour persister les topics
+# Fichier pour persister les topics (ancienne méthode, conservée en secours)
 VIP_TOPICS_FILE = "vip_topics.json"
 
 # Mémoire en RAM :
@@ -19,24 +20,31 @@ _user_topics = {}
 #   topic_id -> user_id
 _topic_to_user = {}
 
+# ====== CONFIG AIRTABLE ======
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+BASE_ID = os.getenv("BASE_ID")
+TABLE_NAME = os.getenv("TABLE_NAME")
+# =============================
+
 
 def save_vip_topics():
     """
-    Sauvegarde _user_topics tel quel dans le fichier JSON.
-    On ne jette plus les champs (note, admin_id, admin_name, etc.).
+    Sauvegarde _user_topics dans le fichier JSON.
+    On garde cette persistance locale en secours.
     """
     data = {str(user_id): d for user_id, d in _user_topics.items()}
     try:
         with open(VIP_TOPICS_FILE, "w") as f:
             json.dump(data, f)
-        print(f"[VIP_TOPICS] Sauvegarde : {len(data)} topics enregistrés.")
+        print(f"[VIP_TOPICS] Sauvegarde JSON : {len(data)} topics enregistrés.")
     except Exception as e:
-        print(f"[VIP_TOPICS] Erreur lors de la sauvegarde : {e}")
+        print(f"[VIP_TOPICS] Erreur lors de la sauvegarde JSON : {e}")
 
 
 def load_vip_topics_from_disk():
     """
-    Ancienne fonction de chargement, gardée si tu l'utilises ailleurs.
+    Ancienne fonction de chargement depuis le JSON.
+    Gardée pour compatibilité / secours.
     """
     try:
         with open(VIP_TOPICS_FILE, "r") as f:
@@ -46,18 +54,23 @@ def load_vip_topics_from_disk():
                 _user_topics[user_id] = d
                 if "topic_id" in d:
                     _topic_to_user[d["topic_id"]] = user_id
-        print(f"[VIP_TOPICS] Chargement : {len(_user_topics)} topics rechargés depuis le fichier.")
+        print(f"[VIP_TOPICS] Chargement JSON : {len(_user_topics)} topics rechargés depuis le fichier.")
     except FileNotFoundError:
         print("[VIP_TOPICS] Aucun fichier de topics à charger.")
     except Exception as e:
-        print(f"[VIP_TOPICS] Erreur au chargement des topics : {e}")
+        print(f"[VIP_TOPICS] Erreur au chargement des topics JSON : {e}")
 
 
 async def ensure_topic_for_vip(user: types.User) -> int:
+    """
+    Vérifie / crée le topic VIP pour un utilisateur.
+    - Si déjà en mémoire → renvoie le topic existant.
+    - Sinon → crée un topic, un panneau de contrôle, sauvegarde en JSON + Airtable.
+    """
     user_id = user.id
     print(f"[VIP_TOPICS] ensure_topic_for_vip() appelé pour user_id={user_id}")
 
-    # Topic déjà existant pour ce VIP
+    # Topic déjà existant pour ce VIP en mémoire
     if user_id in _user_topics:
         topic_id = _user_topics[user_id]["topic_id"]
         print(f"[VIP_TOPICS] Topic déjà connu pour {user_id} -> {topic_id}")
@@ -125,7 +138,39 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         "admin_id": None,
         "admin_name": "Aucun",
     }
+    # Sauvegarde JSON (ancienne méthode, gardée pour l'instant)
     save_vip_topics()
+
+    # ===== Enregistrement du Topic ID dans Airtable =====
+    try:
+        if AIRTABLE_API_KEY and BASE_ID and TABLE_NAME:
+            url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
+            headers = {
+                "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            # On cherche les lignes correspondant à ce user_id ET Type acces = VIP
+            params = {
+                "filterByFormula": f"AND({{ID Telegram}} = '{user_id}', {{Type acces}} = 'VIP')"
+            }
+            r = requests.get(url, headers=headers, params=params)
+            r.raise_for_status()
+            records = r.json().get("records", [])
+
+            for rec in records:
+                rec_id = rec["id"]
+                patch_url = f"{url}/{rec_id}"
+                data = {"fields": {"Topic ID": topic_id}}
+                pr = requests.patch(patch_url, json=data, headers=headers)
+                if pr.status_code != 200:
+                    print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
+                else:
+                    print(f"[VIP_TOPICS] Topic ID {topic_id} enregistré dans Airtable pour user {user_id}")
+        else:
+            print("[VIP_TOPICS] Variables Airtable manquantes, impossible d'enregistrer Topic ID.")
+    except Exception as e:
+        print(f"[VIP_TOPICS] Erreur mise à jour Airtable Topic ID pour user {user_id} : {e}")
+    # ====================================================
 
     return topic_id
 
@@ -147,7 +192,8 @@ def get_panel_message_id_by_user(user_id: int):
 
 async def load_vip_topics():
     """
-    Autre fonction de chargement (version async) si tu la uses au démarrage.
+    Version async de chargement depuis le JSON.
+    Gardée pour compatibilité si appelée ailleurs.
     """
     try:
         with open(VIP_TOPICS_FILE, "r") as f:
@@ -157,11 +203,11 @@ async def load_vip_topics():
                     user_id = int(user_id_str)
                     _user_topics[user_id] = d
                     _topic_to_user[d["topic_id"]] = user_id
-                    print(f"[VIP_TOPICS] Topic restauré : user_id={user_id} -> topic_id={d['topic_id']}")
+                    print(f"[VIP_TOPICS] Topic restauré (JSON) : user_id={user_id} -> topic_id={d['topic_id']}")
     except FileNotFoundError:
         print("[VIP_TOPICS] Aucun fichier de topics à charger.")
     except Exception as e:
-        print(f"[VIP_TOPICS] Erreur au chargement des topics : {e}")
+        print(f"[VIP_TOPICS] Erreur au chargement des topics (JSON) : {e}")
 
 
 def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_name: str = None):
@@ -184,23 +230,22 @@ def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_
         data["admin_name"] = admin_name
 
     _user_topics[user_id] = data
+    # On garde la sauvegarde JSON pour l’instant
     save_vip_topics()
     return data
 
 
-
-# ========= IMPORT TOPICS DEPUIS AIRTABLE TOPIC ID DEBUT =========
-import os, requests
-
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
-BASE_ID = os.getenv("BASE_ID")
-TABLE_NAME = os.getenv("TABLE_NAME")
+# ========= IMPORT TOPICS DEPUIS AIRTABLE TOPIC ID =========
 
 async def load_vip_topics_from_airtable():
     """
     Charge dans _user_topics et _topic_to_user tous les Topic ID enregistrés dans Airtable
     pour les utilisateurs ayant Type acces = VIP.
     """
+    if not (AIRTABLE_API_KEY and BASE_ID and TABLE_NAME):
+        print("[VIP_TOPICS] Variables Airtable manquantes, impossible de charger les topics.")
+        return
+
     url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
     params = {"filterByFormula": "{Type acces}='VIP'"}
@@ -225,7 +270,13 @@ async def load_vip_topics_from_airtable():
             except:
                 continue
 
-            _user_topics[telegram_id] = {"topic_id": topic_id}
+            _user_topics[telegram_id] = {
+                "topic_id": topic_id,
+                "panel_message_id": None,
+                "note": "Aucune note",
+                "admin_id": None,
+                "admin_name": "Aucun",
+            }
             _topic_to_user[topic_id] = telegram_id
             loaded += 1
 
@@ -234,4 +285,4 @@ async def load_vip_topics_from_airtable():
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur import topics Airtable : {e}")
 
-# ========= IMPORT TOPICS DEPUIS AIRTABLE TOPIC ID FIN =========
+# ========= FIN IMPORT TOPICS DEPUIS AIRTABLE =========
