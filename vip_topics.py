@@ -206,7 +206,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
             params = {
                 "filterByFormula": f"AND({{ID Telegram}} = '{user_id}', {{Type acces}} = 'VIP')"
             }
-            r = requests.get(url_base, headers=headers, params=params)
+            r = requests.get(url_base, headers=headers, params=params, timeout=10)
             r.raise_for_status()
             records = r.json().get("records", [])
 
@@ -221,8 +221,8 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                         "Topic ID": str(topic_id),  # en string
                     }
                 }
-                pr = requests.post(url_base, json=data, headers=headers)
-                if pr.status_code != 200:
+                pr = requests.post(url_base, json=data, headers=headers, timeout=10)
+                if pr.status_code not in (200, 201):
                     print(f"[VIP_TOPICS] Erreur POST Topic ID Airtable pour user {user_id}: {pr.text}")
                 else:
                     print(f"[VIP_TOPICS] Topic ID {topic_id} CRÉÉ dans Airtable pour user {user_id}")
@@ -232,8 +232,8 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                     rec_id = rec["id"]
                     patch_url = f"{url_base}/{rec_id}"
                     data = {"fields": {"Topic ID": str(topic_id)}}  # en string
-                    pr = requests.patch(patch_url, json=data, headers=headers)
-                    if pr.status_code != 200:
+                    pr = requests.patch(patch_url, json=data, headers=headers, timeout=10)
+                    if pr.status_code not in (200, 201):
                         print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
                     else:
                         print(f"[VIP_TOPICS] Topic ID {topic_id} enregistré dans Airtable pour user {user_id}")
@@ -281,9 +281,65 @@ async def load_vip_topics():
         print(f"[VIP_TOPICS] Erreur au chargement des topics (JSON) : {e}")
 
 
+# --------- NOUVELLE FONCTION : upsert annotation vers Airtable ----------
+def upsert_annotation_to_airtable(user_id: int, note: str, admin_name: str = None):
+    """
+    Recherche une ligne {ID Telegram} = user_id dans ANNOT_TABLE_NAME.
+    - Si existe -> PATCH (met à jour Note et Admin)
+    - Sinon -> POST (crée une nouvelle ligne)
+    Logs explicites pour debug dans Render.
+    """
+    if not (ANNOT_API_KEY and ANNOT_BASE_ID and ANNOT_TABLE_NAME):
+        print("[VIP_TOPICS] Config Airtable annotations manquante, annotation non synchronisée.")
+        return
+
+    url_base = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
+    headers = {
+        "Authorization": f"Bearer {ANNOT_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        # Recherche éventuelle
+        params = {"filterByFormula": f"{{ID Telegram}} = '{user_id}'"}
+        r = requests.get(url_base, headers=headers, params=params, timeout=10)
+        r.raise_for_status()
+        records = r.json().get("records", [])
+
+        fields = {"Note": str(note)}
+        if admin_name:
+            fields["Admin"] = str(admin_name)
+
+        if records:
+            # Mettre à jour toutes les lignes correspondantes (normalement 1)
+            for rec in records:
+                rec_id = rec.get("id")
+                patch_url = f"{url_base}/{rec_id}"
+                payload = {"fields": fields}
+                pr = requests.patch(patch_url, json=payload, headers=headers, timeout=10)
+                if pr.status_code not in (200, 201):
+                    print(f"[VIP_TOPICS] Erreur PATCH annotation Airtable pour user {user_id}: {pr.text}")
+                else:
+                    print(f"[VIP_TOPICS] Annotation mise à jour dans Airtable pour user {user_id} (rec {rec_id})")
+        else:
+            # Créer une ligne si rien trouvé
+            payload = {"fields": {"ID Telegram": str(user_id), "Note": str(note)}}
+            if admin_name:
+                payload["fields"]["Admin"] = str(admin_name)
+            pr = requests.post(url_base, json=payload, headers=headers, timeout=10)
+            if pr.status_code not in (200, 201):
+                print(f"[VIP_TOPICS] Erreur POST annotation Airtable pour user {user_id}: {pr.text}")
+            else:
+                print(f"[VIP_TOPICS] Annotation CRÉÉE dans Airtable pour user {user_id}")
+    except Exception as e:
+        print(f"[VIP_TOPICS] Exception lors upsert annotation Airtable pour user {user_id}: {e}")
+
+
 def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_name: str = None):
     """
     Met à jour les infos VIP (note, admin en charge) pour un user_id.
+    - Sauvegarde JSON locale (déjà en place)
+    - Si note est fournie -> upsert dans la table ANNOT_TABLE_NAME d'Airtable
     Retourne le dict complet pour ce user_id.
     """
     if user_id not in _user_topics:
@@ -303,6 +359,16 @@ def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_
     _user_topics[user_id] = data
     # Sauvegarde JSON à chaque modification
     save_vip_topics()
+
+    # -> Synchronisation vers Airtable Annotations (si note présente)
+    if note is not None:
+        # admin_name fallback (si non fourni)
+        admin_for_upsert = admin_name or data.get("admin_name") or ""
+        try:
+            upsert_annotation_to_airtable(user_id=user_id, note=note, admin_name=admin_for_upsert)
+        except Exception as e:
+            print(f"[VIP_TOPICS] Erreur lors de l'upsert annotation (non critique) : {e}")
+
     return data
 
 
@@ -322,7 +388,7 @@ async def load_vip_topics_from_airtable():
     params = {"filterByFormula": "{Type acces}='VIP'"}
 
     try:
-        resp = requests.get(url, headers=headers, params=params)
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         records = resp.json().get("records", [])
 
