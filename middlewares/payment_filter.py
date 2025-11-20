@@ -19,15 +19,8 @@ EXCLUDED_IDS = {
     ADMIN_ID,
     DIRECTEUR_ID,
     7334072965,   # Ton ID perso (Nathan)
-    1788641757,
     6545079601,   # ID admin vendeur
 }
-
-# Boutons autorisés (ReplyKeyboard)
-BOUTONS_AUTORISES = [
-    "🔞 Voir le contenu du jour... tout en jouant 🎰",
-    "✨Discuter en tant que VIP",
-]
 
 # Lien VIP
 VIP_URL = "https://buy.stripe.com/5kQ9AS60J2ET9wxfi57AI0W"

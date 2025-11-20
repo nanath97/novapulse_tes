@@ -11,8 +11,7 @@ from datetime import datetime, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from ban_storage import ban_list
 from middlewares.payment_filter import PaymentFilterMiddleware
-from vip_topics import is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user
-from vip_topics import update_vip_info
+from vip_topics import is_vip, get_user_id_by_topic_id, get_panel_message_id_by_user, update_vip_info, _user_topics
 
 
 
@@ -28,7 +27,7 @@ pending_notes = {}  # admin_id -> user_id
 # Dictionnaire temporaire pour stocker les derniers messages de chaque client
 last_messages = {}
 ADMIN_ID = 7334072965
-authorized_admin_ids = 6545079601
+authorized_admin_ids = {7334072965, 6545079601}
 
 # Constantes pour le bouton VIP et la vidéo de bienvenue (défaut)
 VIP_URL = "https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G"
@@ -886,7 +885,6 @@ async def handle_admin_message(message: types.Message):
         kb = InlineKeyboardMarkup()
         kb.add(
             InlineKeyboardButton("📩 Message gratuit", callback_data="vip_message_gratuit"),
-            InlineKeyboardButton("💸 Message payant", callback_data="vip_message_payant")
         )
         await bot.send_message(
             chat_id=ADMIN_ID,
@@ -1160,13 +1158,6 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
 # 1. code pour le bouton annoter fin
 
 
-
-# 1. code pour le enregistrer la note début
-
-
-# 1. code pour le enregistrer la note fin 
-
-
 # ========== CHOIX DANS LE MENU INLINE ==========
 
 @dp.callback_query_handler(lambda call: call.data in ["vip_message_gratuit", "vip_message_payant"])
@@ -1289,6 +1280,137 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
 
 
 
+# ---------- Multi-chatter : prise en charge + transmission des réponses ----------
+# Nécessite : update_vip_info, get_user_id_by_topic_id, get_panel_message_id_by_user importés
+# Normalise la variable authorized_admin_ids si elle existe. Sinon, on tombe sur ADMIN_ID seul.
+try:
+    # authorized_admin_ids peut être défini ailleurs dans ton fichier ; on le normalize ici
+    if "authorized_admin_ids" in globals():
+        raw = globals().get("authorized_admin_ids")
+        if isinstance(raw, (set, list, tuple)):
+            AUTHORIZED_ADMIN_IDS = set(int(x) for x in raw)
+        else:
+            # si c'est un int string etc.
+            AUTHORIZED_ADMIN_IDS = {int(raw)}
+    else:
+        AUTHORIZED_ADMIN_IDS = {ADMIN_ID}
+except Exception:
+    AUTHORIZED_ADMIN_IDS = {ADMIN_ID}
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
+async def handle_prendre_vip(callback_query: types.CallbackQuery):
+    admin_id = callback_query.from_user.id
+
+    # Vérifier qu'on clique bien depuis le STAFF_GROUP
+    if callback_query.message.chat.id != STAFF_GROUP_ID:
+        await callback_query.answer("Action réservée au staff.", show_alert=True)
+        return
+
+    # Vérifier que celui qui clique est un admin autorisé
+    if admin_id not in AUTHORIZED_ADMIN_IDS:
+        await callback_query.answer("Tu n'es pas autorisé à prendre en charge des VIPs.", show_alert=True)
+        return
+
+    # Récupère l'user_id du VIP depuis la callback
+    try:
+        user_id = int(callback_query.data.split("_", 1)[1])
+    except Exception:
+        await callback_query.answer("Données invalides.", show_alert=True)
+        return
+
+    # On récupère/initialise l'entrée VIP et on assigne l'admin
+    admin_name = callback_query.from_user.username or callback_query.from_user.first_name or str(admin_id)
+    info = update_vip_info(user_id, admin_id=admin_id, admin_name=admin_name)
+
+    panel_message_id = info.get("panel_message_id")
+    if not panel_message_id:
+        await callback_query.answer("Impossible de retrouver le panneau VIP.", show_alert=True)
+        return
+
+    # Construire le panneau mis à jour
+    panel_text = (
+        "🧐 PANEL DE CONTRÔLE VIP\n\n"
+        f"👤 Client : {user_id}\n"
+        f"📒 Notes : {info.get('note', 'Aucune note')}\n"
+        f"👤 Admin en charge : {admin_name}"
+    )
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Prendre en charge", callback_data=f"prendre_{user_id}"),
+        InlineKeyboardButton("📝 Ajouter une note", callback_data=f"annoter_{user_id}")
+    )
+
+    try:
+        await bot.edit_message_text(
+            chat_id=STAFF_GROUP_ID,
+            message_id=panel_message_id,
+            text=panel_text,
+            reply_markup=kb
+        )
+    except Exception as e:
+        print(f"[PRIV] Erreur mise à jour panneau pour user {user_id} : {e}")
+
+    await callback_query.answer("✅ Tu as pris en charge ce client.", show_alert=False)
+
+
+# Handler : quand un admin écrit DANS UN TOPIC (thread) du STAFF, on redirige vers le VIP s'il est assigné.
+@dp.message_handler(lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None)
+async def handle_staff_reply_to_vip(m: types.Message):
+    admin_id = m.from_user.id
+    topic_id = m.message_thread_id
+
+    # Qui est le VIP correspondant à ce topic ?
+    vip_user_id = get_user_id_by_topic_id(topic_id)
+    if not vip_user_id:
+        # Pas de mapping topic -> user (peut arriver) : on ignore
+        return
+
+    # Récupérer l'info VIP (doit exister)
+    info = _user_topics.get(vip_user_id, {})
+    assigned_admin = info.get("admin_id")
+
+    # Si l'admin n'est PAS l'assigné, on l'avertit et on ne transmet pas
+    if assigned_admin is None or int(assigned_admin) != int(admin_id):
+        try:
+            await m.reply("❌ Tu n'es pas l'admin en charge de ce client. Utilise le bouton 'Prendre en charge' pour t'assigner.", reply=False)
+        except Exception:
+            pass
+        return
+
+    # Si c'est l'admin assigné => transmettre le message au client
+    try:
+        # Texte
+        if m.content_type == types.ContentType.TEXT:
+            await bot.send_message(
+                chat_id=vip_user_id,
+                text=m.text,
+            )
+        else:
+            # Pour média / stickers / photos / vidéos etc. : on copie le message depuis le staff group vers le client
+            # copy_message est utile pour conserver média + légende
+            await bot.copy_message(
+                chat_id=vip_user_id,
+                from_chat_id=m.chat.id,
+                message_id=m.message_id
+            )
+
+        # Optionnel : notifier dans le topic que le message a été envoyé
+        try:
+            await bot.send_message(
+                chat_id=STAFF_GROUP_ID,
+                message_thread_id=topic_id,
+                text=f"✅ Message envoyé au client par @{m.from_user.username or m.from_user.first_name or admin_id}.",
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[PRIV] Erreur envoi message admin->{vip_user_id} : {e}")
+        try:
+            await m.reply("❌ Échec envoi au client.", reply=False)
+        except Exception:
+            pass
 
 
 #mettre le tableau de vips
