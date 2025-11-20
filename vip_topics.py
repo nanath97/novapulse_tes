@@ -1,5 +1,4 @@
 # vip_topics.py
-
 import os
 import json
 import requests  # pour appeler l'API Airtable
@@ -45,7 +44,7 @@ def save_vip_topics():
     data = {str(user_id): d for user_id, d in _user_topics.items()}
     try:
         with open(VIP_TOPICS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+            json.dump(data, f, ensure_ascii=False)
         print(f"[VIP_TOPICS] Sauvegarde JSON : {len(data)} topics enregistrés.")
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur lors de la sauvegarde JSON : {e}")
@@ -64,52 +63,56 @@ def load_vip_topics_from_disk():
     try:
         with open(VIP_TOPICS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-
-        merged = 0
-
-        for user_id_str, d in data.items():
-            try:
-                user_id = int(user_id_str)
-            except Exception:
-                continue
-
-            existing = _user_topics.get(user_id)
-
-            if not existing:
-                # Cas : JSON connaît ce VIP mais Airtable n'a pas encore été chargé
-                existing = {
-                    "topic_id": d.get("topic_id"),
-                    "panel_message_id": d.get("panel_message_id"),
-                    "note": d.get("note", "Aucune note"),
-                    "admin_id": d.get("admin_id"),
-                    "admin_name": d.get("admin_name", "Aucun"),
-                }
-            else:
-                # On fusionne uniquement les infos d'annotation
-                if "panel_message_id" in d:
-                    existing["panel_message_id"] = d["panel_message_id"]
-                if "note" in d:
-                    existing["note"] = d["note"]
-                if "admin_id" in d:
-                    existing["admin_id"] = d["admin_id"]
-                if "admin_name" in d:
-                    existing["admin_name"] = d["admin_name"]
-
-            _user_topics[user_id] = existing
-
-            # On complète aussi la map inverse si on connaît le topic_id
-            topic_id = existing.get("topic_id")
-            if topic_id is not None:
-                _topic_to_user[topic_id] = user_id
-
-            merged += 1
-
-        print(f"[VIP_TOPICS] Annotations restaurées depuis JSON pour {merged} VIP(s).")
-
     except FileNotFoundError:
         print("[VIP_TOPICS] Aucun fichier vip_topics.json à charger (normal si première exécution).")
+        return
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur au chargement des annotations depuis JSON : {e}")
+        return
+
+    merged = 0
+
+    for user_id_str, d in data.items():
+        try:
+            user_id = int(user_id_str)
+        except Exception:
+            continue
+
+        existing = _user_topics.get(user_id)
+
+        if not existing:
+            # Cas : JSON connaît ce VIP mais Airtable n'a pas encore été chargé
+            existing = {
+                "topic_id": d.get("topic_id"),
+                "panel_message_id": d.get("panel_message_id"),
+                "note": d.get("note", "Aucune note"),
+                "admin_id": d.get("admin_id"),
+                "admin_name": d.get("admin_name", "Aucun"),
+            }
+        else:
+            # On fusionne uniquement les infos d'annotation
+            if "panel_message_id" in d and d.get("panel_message_id") is not None:
+                existing["panel_message_id"] = d["panel_message_id"]
+            if "note" in d:
+                existing["note"] = d["note"]
+            if "admin_id" in d:
+                existing["admin_id"] = d["admin_id"]
+            if "admin_name" in d:
+                existing["admin_name"] = d["admin_name"]
+
+        _user_topics[user_id] = existing
+
+        # On complète aussi la map inverse si on connaît le topic_id
+        topic_id = existing.get("topic_id")
+        if topic_id is not None:
+            try:
+                _topic_to_user[int(topic_id)] = user_id
+            except Exception:
+                pass
+
+        merged += 1
+
+    print(f"[VIP_TOPICS] Annotations restaurées depuis JSON pour {merged} VIP(s).")
 
 
 async def ensure_topic_for_vip(user: types.User) -> int:
@@ -150,7 +153,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
 
     print(f"[VIP_TOPICS] Nouveau topic créé pour {user_id} dans {STAFF_GROUP_ID} -> topic_id={topic_id}")
 
-    _topic_to_user[topic_id] = user_id
+    _topic_to_user[int(topic_id)] = user_id
 
     # Clavier du panneau de contrôle
     kb = InlineKeyboardMarkup()
@@ -184,7 +187,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
 
     # On initialise l'entrée avec topic + panneau, sans note ni admin pour l'instant
     _user_topics[user_id] = {
-        "topic_id": topic_id,
+        "topic_id": int(topic_id),
         "panel_message_id": panel_message_id,
         "note": "Aucune note",
         "admin_id": None,
@@ -223,7 +226,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                 }
                 pr = requests.post(url_base, json=data, headers=headers, timeout=10)
                 if pr.status_code not in (200, 201):
-                    print(f"[VIP_TOPICS] Erreur POST Topic ID Airtable pour user {user_id}: {pr.text}")
+                    print(f"[VIP_TOPICS] Erreur POST Topic ID Airtable pour user {user_id}: {pr.status_code} {pr.text}")
                 else:
                     print(f"[VIP_TOPICS] Topic ID {topic_id} CRÉÉ dans Airtable pour user {user_id}")
             else:
@@ -234,7 +237,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
                     data = {"fields": {"Topic ID": str(topic_id)}}  # en string
                     pr = requests.patch(patch_url, json=data, headers=headers, timeout=10)
                     if pr.status_code not in (200, 201):
-                        print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.text}")
+                        print(f"[VIP_TOPICS] Erreur PATCH Topic ID Airtable pour user {user_id}: {pr.status_code} {pr.text}")
                     else:
                         print(f"[VIP_TOPICS] Topic ID {topic_id} enregistré dans Airtable pour user {user_id}")
         else:
@@ -243,7 +246,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
         print(f"[VIP_TOPICS] Erreur mise à jour Airtable Topic ID pour user {user_id} : {e}")
     # ====================================================
 
-    return topic_id
+    return int(topic_id)
 
 
 def is_vip(user_id: int) -> bool:
@@ -251,7 +254,7 @@ def is_vip(user_id: int) -> bool:
 
 
 def get_user_id_by_topic_id(topic_id: int):
-    return _topic_to_user.get(topic_id)
+    return _topic_to_user.get(int(topic_id))
 
 
 def get_panel_message_id_by_user(user_id: int):
@@ -273,7 +276,7 @@ async def load_vip_topics():
                 if "topic_id" in d:
                     user_id = int(user_id_str)
                     _user_topics[user_id] = d
-                    _topic_to_user[d["topic_id"]] = user_id
+                    _topic_to_user[int(d["topic_id"])] = user_id
                     print(f"[VIP_TOPICS] Topic restauré (JSON) : user_id={user_id} -> topic_id={d['topic_id']}")
     except FileNotFoundError:
         print("[VIP_TOPICS] Aucun fichier de topics à charger.")
@@ -281,148 +284,116 @@ async def load_vip_topics():
         print(f"[VIP_TOPICS] Erreur au chargement des topics (JSON) : {e}")
 
 
-# --------- NOUVELLE FONCTION : upsert annotation vers Airtable ----------
-def upsert_annotation_to_airtable(user_id: int, note: str, admin_name: str = None):
+def _find_annotation_record_for_user(user_id: int):
     """
-    Recherche une ligne {ID Telegram} = user_id dans ANNOT_TABLE_NAME.
-    - Si existe -> PATCH (met à jour Note et Admin)
-    - Sinon -> POST (crée une nouvelle ligne)
-    Logs explicites pour debug dans Render.
+    Cherche dans la table AnnotationsVIP une ligne correspondant à ID Telegram = user_id.
+    Retourne l'ID de record Airtable si trouvé, sinon None.
     """
     if not (ANNOT_API_KEY and ANNOT_BASE_ID and ANNOT_TABLE_NAME):
-        print("[VIP_TOPICS] Config Airtable annotations manquante, annotation non synchronisée.")
-        return
-
-    url_base = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
-    headers = {
-        "Authorization": f"Bearer {ANNOT_API_KEY}",
-        "Content-Type": "application/json"
-    }
+        return None
 
     try:
-        # Recherche éventuelle
+        url = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
+        headers = {"Authorization": f"Bearer {ANNOT_API_KEY}"}
         params = {"filterByFormula": f"{{ID Telegram}} = '{user_id}'"}
-        r = requests.get(url_base, headers=headers, params=params, timeout=10)
+        r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
         records = r.json().get("records", [])
-
-        fields = {"Note": str(note)}
-        if admin_name:
-            fields["Admin"] = str(admin_name)
-
-        if records:
-            # Mettre à jour toutes les lignes correspondantes (normalement 1)
-            for rec in records:
-                rec_id = rec.get("id")
-                patch_url = f"{url_base}/{rec_id}"
-                payload = {"fields": fields}
-                pr = requests.patch(patch_url, json=payload, headers=headers, timeout=10)
-                if pr.status_code not in (200, 201):
-                    print(f"[VIP_TOPICS] Erreur PATCH annotation Airtable pour user {user_id}: {pr.text}")
-                else:
-                    print(f"[VIP_TOPICS] Annotation mise à jour dans Airtable pour user {user_id} (rec {rec_id})")
-        else:
-            # Créer une ligne si rien trouvé
-            payload = {"fields": {"ID Telegram": str(user_id), "Note": str(note)}}
-            if admin_name:
-                payload["fields"]["Admin"] = str(admin_name)
-            pr = requests.post(url_base, json=payload, headers=headers, timeout=10)
-            if pr.status_code not in (200, 201):
-                print(f"[VIP_TOPICS] Erreur POST annotation Airtable pour user {user_id}: {pr.text}")
-            else:
-                print(f"[VIP_TOPICS] Annotation CRÉÉE dans Airtable pour user {user_id}")
+        if not records:
+            return None
+        # On prend la première ligne correspondante
+        return records[0]["id"]
     except Exception as e:
-        print(f"[VIP_TOPICS] Exception lors upsert annotation Airtable pour user {user_id}: {e}")
+        print(f"[ANNOTATION] Erreur recherche record annotation pour {user_id}: {e}")
+        return None
 
 
-# --------- NOUVELLE FONCTION : chargement annotations depuis Airtable ----------
-def load_annotations_from_airtable():
+def _upsert_annotation_to_airtable(user_id: int, note: str = None, admin_name: str = None):
     """
-    Charge toutes les annotations depuis ANNOT_TABLE_NAME (AnnotationsVIP)
-    et fusionne Note / Admin dans _user_topics.
+    Upsert simple : si un record existe pour cet user dans ANNOT_TABLE_NAME -> PATCH, sinon POST.
     """
     if not (ANNOT_API_KEY and ANNOT_BASE_ID and ANNOT_TABLE_NAME):
-        print("[VIP_TOPICS] Config Airtable annotations manquante, impossible de charger les annotations.")
-        return
-
-    url_base = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
-    headers = {"Authorization": f"Bearer {ANNOT_API_KEY}"}
+        # Pas de configuration, on skip proprement
+        return False
 
     try:
-        resp = requests.get(url_base, headers=headers, timeout=10)
-        resp.raise_for_status()
-        records = resp.json().get("records", [])
+        url = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
+        headers = {
+            "Authorization": f"Bearer {ANNOT_API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-        merged = 0
-        for rec in records:
-            f = rec.get("fields", {})
-            telegram_id = f.get("ID Telegram")
-            note = f.get("Note")
-            admin = f.get("Admin")
+        rec_id = _find_annotation_record_for_user(user_id)
+        fields = {"ID Telegram": str(user_id)}
+        if note is not None:
+            fields["Note"] = str(note)
+        if admin_name is not None:
+            fields["Admin"] = str(admin_name)
 
-            if not telegram_id:
-                continue
-            try:
-                tid = int(str(telegram_id))
-            except Exception:
-                continue
+        data = {"fields": fields}
 
-            # S'assurer qu'une entrée existe
-            existing = _user_topics.get(tid, {
-                "topic_id": None,
-                "panel_message_id": None,
-                "note": "Aucune note",
-                "admin_id": None,
-                "admin_name": "Aucun"
-            })
-
-            # Fusionner uniquement note/admin
-            if note:
-                existing["note"] = str(note)
-            if admin:
-                existing["admin_name"] = str(admin)
-
-            _user_topics[tid] = existing
-            merged += 1
-
-        print(f"[VIP_TOPICS] {merged} annotations chargées depuis {ANNOT_TABLE_NAME}.")
+        if rec_id:
+            # PATCH
+            patch_url = f"{url}/{rec_id}"
+            r = requests.patch(patch_url, json=data, headers=headers, timeout=10)
+            if r.status_code not in (200, 201):
+                print(f"[ANNOTATION] Erreur PATCH annotation pour {user_id}: {r.status_code} {r.text}")
+                return False
+            print(f"[ANNOTATION] Annotation mise à jour pour {user_id} (record {rec_id}).")
+            return True
+        else:
+            r = requests.post(url, json=data, headers=headers, timeout=10)
+            if r.status_code not in (200, 201):
+                print(f"[ANNOTATION] Erreur POST annotation pour {user_id}: {r.status_code} {r.text}")
+                return False
+            print(f"[ANNOTATION] Annotation CRÉÉE pour {user_id}.")
+            return True
     except Exception as e:
-        print(f"[VIP_TOPICS] Erreur chargement annotations Airtable : {e}")
+        print(f"[ANNOTATION] Exception upsert annotation pour {user_id}: {e}")
+        return False
 
 
 def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_name: str = None):
     """
     Met à jour les infos VIP (note, admin en charge) pour un user_id.
-    - Sauvegarde JSON locale (déjà en place)
-    - Si note est fournie -> upsert dans la table ANNOT_TABLE_NAME d'Airtable
     Retourne le dict complet pour ce user_id.
     """
     if user_id not in _user_topics:
-        _user_topics[user_id] = {}
+        # pré-structure minimale
+        _user_topics[user_id] = {
+            "topic_id": None,
+            "panel_message_id": None,
+            "note": "Aucune note",
+            "admin_id": None,
+            "admin_name": "Aucun",
+        }
 
     data = _user_topics[user_id]
 
-    if note is not None:
+    changed = False
+
+    if note is not None and note != data.get("note"):
         data["note"] = note
+        changed = True
 
-    if admin_id is not None:
+    if admin_id is not None and admin_id != data.get("admin_id"):
         data["admin_id"] = admin_id
+        changed = True
 
-    if admin_name is not None:
+    if admin_name is not None and admin_name != data.get("admin_name"):
         data["admin_name"] = admin_name
+        changed = True
 
     _user_topics[user_id] = data
-    # Sauvegarde JSON à chaque modification
-    save_vip_topics()
 
-    # -> Synchronisation vers Airtable Annotations (si note présente)
-    if note is not None:
-        # admin_name fallback (si non fourni)
-        admin_for_upsert = admin_name or data.get("admin_name") or ""
+    # Si on a des changements, on persiste localement et dans ANNOT table
+    if changed:
+        save_vip_topics()
+        # push vers la table AnnotationsVIP si configurée (note + admin_name)
         try:
-            upsert_annotation_to_airtable(user_id=user_id, note=note, admin_name=admin_for_upsert)
+            _upsert_annotation_to_airtable(user_id, note=data.get("note"), admin_name=data.get("admin_name"))
         except Exception as e:
-            print(f"[VIP_TOPICS] Erreur lors de l'upsert annotation (non critique) : {e}")
+            print(f"[ANNOTATION] Erreur lors de l'upsert depuis update_vip_info: {e}")
 
     return data
 
@@ -462,13 +433,14 @@ async def load_vip_topics_from_airtable():
             except Exception:
                 continue
 
-            _user_topics[telegram_id_int] = {
-                "topic_id": topic_id_int,
-                "panel_message_id": None,
-                "note": "Aucune note",
-                "admin_id": None,
-                "admin_name": "Aucun",
-            }
+            # Si une entrée existe déjà (ex: data loaded from JSON), on ne perd rien : on merge le topic_id
+            existing = _user_topics.get(telegram_id_int, {})
+            existing["topic_id"] = topic_id_int
+            existing.setdefault("panel_message_id", existing.get("panel_message_id"))
+            existing.setdefault("note", existing.get("note", "Aucune note"))
+            existing.setdefault("admin_id", existing.get("admin_id"))
+            existing.setdefault("admin_name", existing.get("admin_name", "Aucun"))
+            _user_topics[telegram_id_int] = existing
             _topic_to_user[topic_id_int] = telegram_id_int
             loaded += 1
 
@@ -477,18 +449,74 @@ async def load_vip_topics_from_airtable():
     except Exception as e:
         print(f"[VIP_TOPICS] Erreur import topics Airtable : {e}")
 
-# ========= FIN IMPORT TOPICS DEPUIS AIRTABLE =========
+
+# ========= IMPORT ANNOTATIONS DEPUIS AIRTABLE (nouvelle table) =========
+def load_annotations_from_airtable():
+    """
+    Charge les annotations (Note, Admin) depuis la table ANNOT_TABLE_NAME et merge dans _user_topics.
+    Cette fonction est synchrone et doit être appelée pendant le startup (avant restore_missing_panels).
+    """
+    if not (ANNOT_API_KEY and ANNOT_BASE_ID and ANNOT_TABLE_NAME):
+        print("[ANNOTATION] Variables ANNOT Airtable non configurées — skip.")
+        return
+
+    url = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
+    headers = {"Authorization": f"Bearer {ANNOT_API_KEY}"}
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        records = resp.json().get("records", [])
+
+        loaded = 0
+        for rec in records:
+            f = rec.get("fields", {})
+            telegram_id = f.get("ID Telegram")
+            note = f.get("Note")
+            admin = f.get("Admin")
+
+            if not telegram_id:
+                continue
+            try:
+                tid = int(telegram_id)
+            except Exception:
+                continue
+
+            existing = _user_topics.get(tid, {})
+            # Merge annotations (note/admin). On ne touche pas au topic_id ici.
+            if note is not None:
+                existing["note"] = str(note)
+            if admin is not None:
+                existing["admin_name"] = str(admin)
+            # Ensure minimal keys
+            existing.setdefault("topic_id", existing.get("topic_id"))
+            existing.setdefault("panel_message_id", existing.get("panel_message_id"))
+            existing.setdefault("admin_id", existing.get("admin_id"))
+            _user_topics[tid] = existing
+            loaded += 1
+
+        print(f"[ANNOTATION] {loaded} annotations chargées depuis la table {ANNOT_TABLE_NAME}.")
+
+        # After merging annotations, persist to local JSON so restore_missing_panels can use them
+        if loaded > 0:
+            save_vip_topics()
+
+    except Exception as e:
+        print(f"[ANNOTATION] Erreur chargement annotations Airtable : {e}")
+
+
+# ========= FIN IMPORT ANNOTATIONS =========
 
 
 async def restore_missing_panels():
     """
     Après chargement via Airtable + fusion JSON, recrée un panneau de contrôle
-    pour chaque VIP qui a un topic_id mais pas de panel_message_id.
+    pour chaque VIP qui a un topic_id but not panel_message_id.
     Utilise la note et l'admin_name si disponibles.
     """
     restored = 0
 
-    for user_id, info in _user_topics.items():
+    for user_id, info in list(_user_topics.items()):
         topic_id = info.get("topic_id")
         panel_message_id = info.get("panel_message_id")
 
