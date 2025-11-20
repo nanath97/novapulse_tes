@@ -1282,7 +1282,10 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
 
 
 
+from aiogram.dispatcher.handler import CancelHandler
 from aiogram.utils.exceptions import TelegramAPIError, MessageNotModified
+from aiogram import types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Normalise authorized_admin_ids (doit être défini quelque part sinon met ADMIN_ID)
 try:
@@ -1353,7 +1356,7 @@ async def handle_prendre_vip(callback_query: types.CallbackQuery):
 
 @dp.message_handler(
     lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None,
-    content_types=types.ContentTypes.ALL
+    content_types=types.ContentType.ANY
 )
 async def handle_staff_reply_to_vip(m: types.Message):
     admin_id = m.from_user.id
