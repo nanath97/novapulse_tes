@@ -19,11 +19,17 @@ _user_topics = {}
 #   topic_id -> user_id
 _topic_to_user = {}
 
-# ====== CONFIG AIRTABLE ======
+# ====== CONFIG AIRTABLE PRINCIPAL (paiements / VIP / Topic ID) ======
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 BASE_ID = os.getenv("BASE_ID")
 TABLE_NAME = os.getenv("TABLE_NAME")
-# =============================
+# ============================================================
+
+# ====== CONFIG AIRTABLE ANNOTATIONS (nouvelle table) ======
+ANNOT_API_KEY = os.getenv("ANNOT_API_KEY") or AIRTABLE_API_KEY
+ANNOT_BASE_ID = os.getenv("ANNOT_BASE_ID", BASE_ID)
+ANNOT_TABLE_NAME = os.getenv("ANNOT_TABLE_NAME")  # doit être défini pour activer la sync
+# =========================================================
 
 
 def save_vip_topics():
@@ -187,7 +193,7 @@ async def ensure_topic_for_vip(user: types.User) -> int:
     # Sauvegarde JSON
     save_vip_topics()
 
-    # ===== Enregistrement / mise à jour du Topic ID dans Airtable =====
+    # ===== Enregistrement / mise à jour du Topic ID dans le Airtable principal =====
     try:
         if AIRTABLE_API_KEY and BASE_ID and TABLE_NAME:
             url_base = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME.replace(' ', '%20')}"
