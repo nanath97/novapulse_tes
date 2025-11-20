@@ -22,6 +22,11 @@ EXCLUDED_IDS = {
     6545079601,   # ID admin vendeur
 }
 
+BOUTONS_AUTORISES = [
+    "🔞 Voir le contenu du jour... tout en jouant 🎰",
+    "✨Discuter en tant que VIP",
+]
+
 # Lien VIP
 VIP_URL = "https://buy.stripe.com/5kQ9AS60J2ET9wxfi57AI0W"
 
