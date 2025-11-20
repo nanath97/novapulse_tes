@@ -25,25 +25,35 @@ async def telegram_webhook(request: Request):
         return {"ok": False, "error": str(e)}
     return {"ok": True}
 
-
 @app.on_event("startup")
 async def startup_event():
     try:
         # 1) Recharge les VIP dans authorized_users
-        bott_webhook.initialize_authorized_users()
+        try:
+            bott_webhook.initialize_authorized_users()
+        except Exception as e:
+            print(f"[STARTUP] Warning: initialize_authorized_users a échoué : {e}")
 
-        # 2) Recharge les Topic IDs depuis Airtable
+        # 2) Recharge les Topic IDs depuis Airtable (source de vérité)
         await load_vip_topics_from_airtable()
 
-        # 3) Recharge les annotations (note, admin, panel) depuis JSON
+        # 3) Recharge les annotations + panneaux locaux depuis disque (fallback local)
         load_vip_topics_from_disk()
 
-        # 4) Recrée les panneaux manquants si besoin
+        # 4) Recharge les annotations depuis la nouvelle table Airtable (AnnotationsVIP)
+        #    → merge automatiquement note + admin vers _user_topics
+        try:
+            load_annotations_from_airtable()
+        except Exception as e:
+            print(f"[ANNOTATION] Échec chargement Airtable : {e}")
+
+        # 5) Recrée les panneaux manquants, avec note/admin si présents
         await restore_missing_panels()
 
         print("[STARTUP] VIP + topics + annotations initialisés.")
     except Exception as e:
         print(f"[STARTUP ERROR] Erreur pendant le chargement des VIP : {e}")
+
 
 
 

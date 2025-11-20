@@ -335,6 +335,61 @@ def upsert_annotation_to_airtable(user_id: int, note: str, admin_name: str = Non
         print(f"[VIP_TOPICS] Exception lors upsert annotation Airtable pour user {user_id}: {e}")
 
 
+# --------- NOUVELLE FONCTION : chargement annotations depuis Airtable ----------
+def load_annotations_from_airtable():
+    """
+    Charge toutes les annotations depuis ANNOT_TABLE_NAME (AnnotationsVIP)
+    et fusionne Note / Admin dans _user_topics.
+    """
+    if not (ANNOT_API_KEY and ANNOT_BASE_ID and ANNOT_TABLE_NAME):
+        print("[VIP_TOPICS] Config Airtable annotations manquante, impossible de charger les annotations.")
+        return
+
+    url_base = f"https://api.airtable.com/v0/{ANNOT_BASE_ID}/{ANNOT_TABLE_NAME.replace(' ', '%20')}"
+    headers = {"Authorization": f"Bearer {ANNOT_API_KEY}"}
+
+    try:
+        resp = requests.get(url_base, headers=headers, timeout=10)
+        resp.raise_for_status()
+        records = resp.json().get("records", [])
+
+        merged = 0
+        for rec in records:
+            f = rec.get("fields", {})
+            telegram_id = f.get("ID Telegram")
+            note = f.get("Note")
+            admin = f.get("Admin")
+
+            if not telegram_id:
+                continue
+            try:
+                tid = int(str(telegram_id))
+            except Exception:
+                continue
+
+            # S'assurer qu'une entrée existe
+            existing = _user_topics.get(tid, {
+                "topic_id": None,
+                "panel_message_id": None,
+                "note": "Aucune note",
+                "admin_id": None,
+                "admin_name": "Aucun"
+            })
+
+            # Fusionner uniquement note/admin
+            if note:
+                existing["note"] = str(note)
+            if admin:
+                existing["admin_name"] = str(admin)
+
+            _user_topics[tid] = existing
+            merged += 1
+
+        print(f"[VIP_TOPICS] {merged} annotations chargées depuis {ANNOT_TABLE_NAME}.")
+    except Exception as e:
+        print(f"[VIP_TOPICS] Erreur chargement annotations Airtable : {e}")
+
+
 def update_vip_info(user_id: int, note: str = None, admin_id: int = None, admin_name: str = None):
     """
     Met à jour les infos VIP (note, admin en charge) pour un user_id.

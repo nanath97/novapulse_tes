@@ -1092,7 +1092,7 @@ async def handle_prendre_en_charge(callback_query: types.CallbackQuery):
 
 
 
-@dp.callback_query_handler(lambda c: c.data.startswith("annoter_"))
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("annoter_"))
 async def handle_annoter_vip(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
 
@@ -1108,6 +1108,17 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
         await callback_query.answer("Données invalides.", show_alert=True)
         return
 
+    # Si l'admin est déjà en mode note, renvoyer une info et ne rien re-créer
+    if admin_id in pending_notes:
+        current_target = pending_notes.get(admin_id)
+        # Si c'est pour le même client, on informe
+        if current_target == user_id:
+            await callback_query.answer("📝 Tu es déjà en mode annotation pour ce client. Envoie ta note dans le topic.", show_alert=False)
+            return
+        # Sinon, prévenir que l'admin est déjà en mode note pour un autre client
+        await callback_query.answer("🔔 Tu es actuellement en mode annotation pour un autre client. Termine ou annule d'abord.", show_alert=True)
+        return
+
     # On récupère les infos déjà stockées (topic_id, panel_message_id, etc.)
     info = update_vip_info(user_id)  # sans note/admin => juste retour du dict
     topic_id = info.get("topic_id")
@@ -1119,20 +1130,29 @@ async def handle_annoter_vip(callback_query: types.CallbackQuery):
     # On passe cet admin en "mode note" pour ce user_id
     pending_notes[admin_id] = user_id
 
-    await callback_query.answer()  # ferme le loader du bouton
+    # Marquer l'admin comme "en train d'annoter" visuellement (ferme le loader)
+    await callback_query.answer()
 
-    # ⚠️ ICI : on utilise bot.request, PAS bot.send_message
-    await bot.request(
-        "sendMessage",
-        {
-            "chat_id": STAFF_GROUP_ID,
-            "message_thread_id": topic_id,
-            "text": (
-                f"📝 Envoie maintenant ta note pour le client {user_id} dans ce topic.\n"
-                "➡️ Le prochain message que tu écris ici sera enregistré comme NOTE."
-            ),
-        },
-    )
+    # ⚠️ ICI : on utilise bot.request pour poster DANS LE TOPIC
+    try:
+        await bot.request(
+            "sendMessage",
+            {
+                "chat_id": STAFF_GROUP_ID,
+                "message_thread_id": topic_id,
+                "text": (
+                    f"📝 Envoie maintenant ta note pour le client {user_id} dans ce topic.\n"
+                    "➡️ Le prochain message que tu écris ici sera enregistré comme NOTE.\n\n"
+                    "Si tu veux annuler : envoie `/annuler_note`."
+                ),
+            },
+        )
+    except Exception as e:
+        # Nettoyage si envoi échoue (pour éviter rester bloqué en pending)
+        pending_notes.pop(admin_id, None)
+        print(f"[NOTES] Erreur envoi prompt annotation (callback annoter_) : {e}")
+        await callback_query.answer("Impossible d'envoyer l'invite d'annotation.", show_alert=True)
+
 
 
 
