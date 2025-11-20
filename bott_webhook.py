@@ -885,6 +885,7 @@ async def handle_admin_message(message: types.Message):
         kb = InlineKeyboardMarkup()
         kb.add(
             InlineKeyboardButton("📩 Message gratuit", callback_data="vip_message_gratuit"),
+            InlineKeyboardButton("💸 Message payant", callback_data="vip_message_payant")
         )
         await bot.send_message(
             chat_id=ADMIN_ID,
