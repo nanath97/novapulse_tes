@@ -1281,46 +1281,40 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
 
 
 
-# ---------- Multi-chatter : prise en charge + transmission des réponses ----------
-# Nécessite : update_vip_info, get_user_id_by_topic_id, get_panel_message_id_by_user importés
-# Normalise la variable authorized_admin_ids si elle existe. Sinon, on tombe sur ADMIN_ID seul.
-try:
-    # authorized_admin_ids peut être défini ailleurs dans ton fichier ; on le normalize ici
-    if "authorized_admin_ids" in globals():
-        raw = globals().get("authorized_admin_ids")
-        if isinstance(raw, (set, list, tuple)):
-            AUTHORIZED_ADMIN_IDS = set(int(x) for x in raw)
-        else:
-            # si c'est un int string etc.
-            AUTHORIZED_ADMIN_IDS = {int(raw)}
-    else:
-        AUTHORIZED_ADMIN_IDS = {ADMIN_ID}
-except Exception:
-    AUTHORIZED_ADMIN_IDS = {ADMIN_ID}
 
+from aiogram.utils.exceptions import TelegramAPIError, MessageNotModified
+
+# Normalise authorized_admin_ids (doit être défini quelque part sinon met ADMIN_ID)
+try:
+    raw_admins = globals().get("authorized_admin_ids") or globals().get("AUTHORIZED_ADMIN_IDS")
+    if raw_admins is None:
+        AUTHORIZED_ADMIN_IDS = {int(ADMIN_ID)}
+    elif isinstance(raw_admins, (set, list, tuple)):
+        AUTHORIZED_ADMIN_IDS = set(int(x) for x in raw_admins)
+    else:
+        # si c'est un int/string unique
+        AUTHORIZED_ADMIN_IDS = {int(raw_admins)}
+except Exception:
+    AUTHORIZED_ADMIN_IDS = {int(ADMIN_ID)}
 
 @dp.callback_query_handler(lambda c: c.data.startswith("prendre_"))
 async def handle_prendre_vip(callback_query: types.CallbackQuery):
     admin_id = callback_query.from_user.id
 
-    # Vérifier qu'on clique bien depuis le STAFF_GROUP
     if callback_query.message.chat.id != STAFF_GROUP_ID:
         await callback_query.answer("Action réservée au staff.", show_alert=True)
         return
 
-    # Vérifier que celui qui clique est un admin autorisé
     if admin_id not in AUTHORIZED_ADMIN_IDS:
         await callback_query.answer("Tu n'es pas autorisé à prendre en charge des VIPs.", show_alert=True)
         return
 
-    # Récupère l'user_id du VIP depuis la callback
     try:
         user_id = int(callback_query.data.split("_", 1)[1])
     except Exception:
         await callback_query.answer("Données invalides.", show_alert=True)
         return
 
-    # On récupère/initialise l'entrée VIP et on assigne l'admin
     admin_name = callback_query.from_user.username or callback_query.from_user.first_name or str(admin_id)
     info = update_vip_info(user_id, admin_id=admin_id, admin_name=admin_name)
 
@@ -1329,7 +1323,6 @@ async def handle_prendre_vip(callback_query: types.CallbackQuery):
         await callback_query.answer("Impossible de retrouver le panneau VIP.", show_alert=True)
         return
 
-    # Construire le panneau mis à jour
     panel_text = (
         "🧐 PANEL DE CONTRÔLE VIP\n\n"
         f"👤 Client : {user_id}\n"
@@ -1349,54 +1342,51 @@ async def handle_prendre_vip(callback_query: types.CallbackQuery):
             text=panel_text,
             reply_markup=kb
         )
+    except MessageNotModified:
+        # Rien à faire si identique (évite le bruit)
+        pass
     except Exception as e:
         print(f"[PRIV] Erreur mise à jour panneau pour user {user_id} : {e}")
 
     await callback_query.answer("✅ Tu as pris en charge ce client.", show_alert=False)
 
 
-# Handler : quand un admin écrit DANS UN TOPIC (thread) du STAFF, on redirige vers le VIP s'il est assigné.
-@dp.message_handler(lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None)
+@dp.message_handler(
+    lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None,
+    content_types=types.ContentTypes.ALL
+)
 async def handle_staff_reply_to_vip(m: types.Message):
     admin_id = m.from_user.id
     topic_id = m.message_thread_id
 
-    # Qui est le VIP correspondant à ce topic ?
+    print(f"[STAFF_REPLY] admin_id={admin_id} topic_id={topic_id} content_type={m.content_type}")
+
     vip_user_id = get_user_id_by_topic_id(topic_id)
     if not vip_user_id:
-        # Pas de mapping topic -> user (peut arriver) : on ignore
-        return
+        print(f"[STAFF_REPLY] Aucun VIP lié à topic {topic_id} — on ignore.")
+        # On stoppe la propagation pour éviter forwards globaux
+        raise CancelHandler()
 
-    # Récupérer l'info VIP (doit exister)
     info = _user_topics.get(vip_user_id, {})
     assigned_admin = info.get("admin_id")
+    print(f"[STAFF_REPLY] vip_user_id={vip_user_id}, assigned_admin={assigned_admin}")
 
-    # Si l'admin n'est PAS l'assigné, on l'avertit et on ne transmet pas
-    if assigned_admin is None or int(assigned_admin) != int(admin_id):
+    if not assigned_admin or int(assigned_admin) != int(admin_id):
         try:
             await m.reply("❌ Tu n'es pas l'admin en charge de ce client. Utilise le bouton 'Prendre en charge' pour t'assigner.", reply=False)
         except Exception:
             pass
-        return
+        # Empêche tout autre handler de traiter ou forwarder ce message
+        raise CancelHandler()
 
-    # Si c'est l'admin assigné => transmettre le message au client
+    # Transmettre le message au VIP
     try:
-        # Texte
         if m.content_type == types.ContentType.TEXT:
-            await bot.send_message(
-                chat_id=vip_user_id,
-                text=m.text,
-            )
+            await bot.send_message(chat_id=vip_user_id, text=m.text)
         else:
-            # Pour média / stickers / photos / vidéos etc. : on copie le message depuis le staff group vers le client
-            # copy_message est utile pour conserver média + légende
-            await bot.copy_message(
-                chat_id=vip_user_id,
-                from_chat_id=m.chat.id,
-                message_id=m.message_id
-            )
+            await bot.copy_message(chat_id=vip_user_id, from_chat_id=m.chat.id, message_id=m.message_id)
 
-        # Optionnel : notifier dans le topic que le message a été envoyé
+        # Confirmer dans le topic
         try:
             await bot.send_message(
                 chat_id=STAFF_GROUP_ID,
@@ -1406,12 +1396,24 @@ async def handle_staff_reply_to_vip(m: types.Message):
         except Exception:
             pass
 
-    except Exception as e:
-        print(f"[PRIV] Erreur envoi message admin->{vip_user_id} : {e}")
+        # Stop propagation pour éviter tout autre handler (essentiel)
+        raise CancelHandler()
+
+    except TelegramAPIError as e:
+        print(f"[STAFF_REPLY] Erreur API admin->{vip_user_id} : {e}")
         try:
-            await m.reply("❌ Échec envoi au client.", reply=False)
+            await m.reply("❌ Échec envoi au client (erreur API).", reply=False)
         except Exception:
             pass
+        raise CancelHandler()
+    except Exception as e:
+        print(f"[STAFF_REPLY] Erreur inattendue admin->{vip_user_id} : {e}")
+        try:
+            await m.reply("❌ Erreur interne lors de l'envoi au client.", reply=False)
+        except Exception:
+            pass
+        raise CancelHandler()
+
 
 
 #mettre le tableau de vips
