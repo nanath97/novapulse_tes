@@ -6,7 +6,7 @@ import os
 from core import bot, dp
 import bott_webhook
 from stripe_webhook import router as stripe_router
-from vip_topics import load_vip_topics_from_airtable, load_vip_topics_from_disk, restore_missing_panels
+from vip_topics import load_vip_topics_from_airtable, load_vip_topics_from_disk, restore_missing_panels, load_annotations_from_airtable 
 
 
 load_dotenv()
