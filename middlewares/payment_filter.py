@@ -19,7 +19,8 @@ EXCLUDED_IDS = {
     ADMIN_ID,
     DIRECTEUR_ID,
     7334072965,   # Ton ID perso (Nathan)
-    1788641757,   # ID admin vendeur
+    1788641757,
+    6545079601,   # ID admin vendeur
 }
 
 # Boutons autorisés (ReplyKeyboard)

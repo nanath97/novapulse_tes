@@ -28,7 +28,7 @@ pending_notes = {}  # admin_id -> user_id
 # Dictionnaire temporaire pour stocker les derniers messages de chaque client
 last_messages = {}
 ADMIN_ID = 7334072965
-authorized_admin_ids = [ADMIN_ID]
+authorized_admin_ids = 6545079601
 
 # Constantes pour le bouton VIP et la vidéo de bienvenue (défaut)
 VIP_URL = "https://buy.stripe.com/7sYfZg2OxenB389gm97AI0G"
