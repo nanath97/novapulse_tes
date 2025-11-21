@@ -44,6 +44,39 @@ ADMIN_EMAILS = {
 }
 # Mapping entre ID Telegram des admins et leur email dans Airtable 19juillet 2025 fin
 
+# TEST ADMIN DEBUT
+
+# --- ADMIN IDS depuis l'env (ex: "7334072965,6545079601") ---
+# -> À définir dans Render : ADMIN_IDS = "7334072965,6545079601"
+ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")  # CSV d'IDs admin
+AUTHORIZED_ADMIN_IDS = set()
+
+# Toujours inclure l'ADMIN_ID principal et DIRECTEUR_ID si présents
+try:
+    if os.getenv("ADMIN_ID"):
+        AUTHORIZED_ADMIN_IDS.add(int(os.getenv("ADMIN_ID")))
+except Exception:
+    pass
+
+try:
+    if os.getenv("DIRECTEUR_ID"):
+        AUTHORIZED_ADMIN_IDS.add(int(os.getenv("DIRECTEUR_ID")))
+except Exception:
+    pass
+
+# Parse la CSV (silencieux sur erreurs)
+for part in ADMIN_IDS_RAW.split(","):
+    part = part.strip()
+    if not part:
+        continue
+    try:
+        AUTHORIZED_ADMIN_IDS.add(int(part))
+    except Exception:
+        print(f"[WARN] ADMIN_IDS contient une valeur invalide : {part}")
+
+print(f"[INFO] Admins autorisés : {AUTHORIZED_ADMIN_IDS}")
+
+# TEST ADMIN FIN
 
 # Paiements validés par Stripe, stockés temporairement
 paiements_recents = defaultdict(list)  # ex : {14: [datetime1, datetime2]}
