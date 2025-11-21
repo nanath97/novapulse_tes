@@ -14,48 +14,14 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 DIRECTEUR_ID = int(os.getenv("DIRECTEUR_ID", "0"))
 STAFF_GROUP_ID = int(os.getenv("STAFF_GROUP_ID", "0"))
 
-# --- Récupération sûre des admins autorisés (peut être défini ailleurs) ---
-# On essaie dans l'ordre : variable globale AUTHORIZED_ADMIN_IDS, puis ADMIN_IDS env (CSV)
-AUTHORIZED_ADMIN_IDS = set()
-try:
-    raw = globals().get("AUTHORIZED_ADMIN_IDS")
-    if raw:
-        if isinstance(raw, (set, list, tuple)):
-            AUTHORIZED_ADMIN_IDS = set(int(x) for x in raw)
-        else:
-            AUTHORIZED_ADMIN_IDS = {int(raw)}
-    else:
-        # fallback : lire ADMIN_IDS depuis .env (CSV)
-        admin_ids_csv = os.getenv("ADMIN_IDS", "")
-        for part in admin_ids_csv.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                AUTHORIZED_ADMIN_IDS.add(int(part))
-            except Exception:
-                pass
-except Exception:
-    AUTHORIZED_ADMIN_IDS = {ADMIN_ID}
-
-# Utilisateurs jamais limités (définition avant update)
+# Utilisateurs jamais limités
 EXCLUDED_IDS = {
     ADMIN_ID,
     DIRECTEUR_ID,
     7334072965,   # Ton ID perso (Nathan)
+    6545079601,   # ID admin vendeur
 }
 
-# Fusionner avec les admins autorisés si besoin
-try:
-    EXCLUDED_IDS.update(AUTHORIZED_ADMIN_IDS)
-except Exception:
-    # sécurité si AUTHORIZED_ADMIN_IDS n'est pas itérable
-    try:
-        EXCLUDED_IDS.add(int(AUTHORIZED_ADMIN_IDS))
-    except Exception:
-        pass
-
-# Boutons autorisés
 BOUTONS_AUTORISES = [
     "🔞 Voir le contenu du jour... tout en jouant 🎰",
     "✨Discuter en tant que VIP",
@@ -103,19 +69,15 @@ class PaymentFilterMiddleware(BaseMiddleware):
             if user_id in clients_bannis:
                 try:
                     await message.delete()
-                except Exception:
+                except:
                     pass
-                try:
-                    await message.answer("🚫 Tu as été banni, tu ne peux plus envoyer de messages.")
-                except Exception:
-                    pass
+                await message.answer("🚫 Tu as été banni, tu ne peux plus envoyer de messages.")
                 raise CancelHandler()
 
-        # On ne prend du texte que si c'est du texte, sinon string vide
         text = (message.text or "").strip() if message.content_type == types.ContentType.TEXT else ""
 
-        # Autoriser /start (sécurisé si text == "")
-        if text and text.startswith("/start"):
+        # Autoriser /start
+        if text.startswith("/start"):
             return
 
         # Autoriser boutons ReplyKeyboard
@@ -123,13 +85,13 @@ class PaymentFilterMiddleware(BaseMiddleware):
             if text.startswith(b):
                 return
 
-        # Autoriser liens admin dans le staff (vérifier que c'est bien du texte)
-        if user_id == ADMIN_ID and message.content_type == types.ContentType.TEXT and message.text:
+        # Autoriser liens admin dans le staff
+        if user_id == ADMIN_ID and message.text:
             if lien_non_autorise(message.text):
                 try:
                     await message.delete()
                     await message.answer("🚫 Seuls les liens autorisés sont acceptés.")
-                except Exception:
+                except:
                     pass
                 raise CancelHandler()
             return
@@ -138,21 +100,18 @@ class PaymentFilterMiddleware(BaseMiddleware):
         if user_id not in self.authorized_users:    # NON-VIP
             try:
                 await message.delete()
-            except Exception:
+            except:
                 pass
 
             kb = InlineKeyboardMarkup().add(
                 InlineKeyboardButton("⭐ Devenir membre VIP", url=VIP_URL)
             )
 
-            try:
-                await message.answer(
-                    "Désolée mon coeur, mais pour discuter librement avec moi, tu dois être un vip ! "
-                    "Pour valider ton accès, tu n'as qu'à cliquer sur le lien juste ici ",
-                    reply_markup=kb
-                )
-            except Exception:
-                pass
+            await message.answer(
+                "Désolée mon coeur, mais pour discuter librement avec moi, tu dois être un vip ! "
+                "Pour valider ton accès, tu n'as qu'à cliquer sur le lien juste ici ",
+                reply_markup=kb
+            )
             raise CancelHandler()
 
         # Si VIP → on laisse passer normalement
