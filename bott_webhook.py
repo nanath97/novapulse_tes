@@ -1387,42 +1387,56 @@ async def handle_prendre_vip(callback_query: types.CallbackQuery):
     await callback_query.answer("✅ Tu as pris en charge ce client.", show_alert=False)
 
 
+from aiogram.dispatcher.handler import CancelHandler
+from aiogram.utils.exceptions import TelegramAPIError
+from aiogram import types
+
 @dp.message_handler(
     lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None,
     content_types=types.ContentType.ANY
 )
 async def handle_staff_reply_to_vip(m: types.Message):
-    admin_id = m.from_user.id
+    admin_id = int(m.from_user.id)
     topic_id = m.message_thread_id
 
     print(f"[STAFF_REPLY] admin_id={admin_id} topic_id={topic_id} content_type={m.content_type}")
 
+    # Qui est le VIP correspondant à ce topic ?
     vip_user_id = get_user_id_by_topic_id(topic_id)
     if not vip_user_id:
-        print(f"[STAFF_REPLY] Aucun VIP lié à topic {topic_id} — on ignore.")
-        # On stoppe la propagation pour éviter forwards globaux
+        print(f"[STAFF_REPLY] Aucun VIP lié à topic {topic_id} — on ignore et STOP.")
         raise CancelHandler()
 
+    # Récupérer l'info VIP (doit exister)
     info = _user_topics.get(vip_user_id, {})
     assigned_admin = info.get("admin_id")
-    print(f"[STAFF_REPLY] vip_user_id={vip_user_id}, assigned_admin={assigned_admin}")
 
-    if not assigned_admin or int(assigned_admin) != int(admin_id):
+    # Normaliser assigned_admin en int si possible
+    try:
+        assigned_admin_int = int(assigned_admin) if assigned_admin is not None else None
+    except Exception:
+        assigned_admin_int = None
+
+    print(f"[STAFF_REPLY] vip_user_id={vip_user_id}, assigned_admin={assigned_admin_int}")
+
+    # Si l'admin n'est PAS l'assigné, on l'avertit et on n'envoie pas au client
+    if assigned_admin_int is None or assigned_admin_int != admin_id:
         try:
             await m.reply("❌ Tu n'es pas l'admin en charge de ce client. Utilise le bouton 'Prendre en charge' pour t'assigner.", reply=False)
         except Exception:
             pass
-        # Empêche tout autre handler de traiter ou forwarder ce message
+        # Empêche toute autre handler de traiter ou forwarder ce message
         raise CancelHandler()
 
-    # Transmettre le message au VIP
+    # Si c'est l'admin assigné => transmettre le message au client
     try:
         if m.content_type == types.ContentType.TEXT:
-            await bot.send_message(chat_id=vip_user_id, text=m.text)
+            await bot.send_message(chat_id=int(vip_user_id), text=m.text)
         else:
-            await bot.copy_message(chat_id=vip_user_id, from_chat_id=m.chat.id, message_id=m.message_id)
+            # copy_message conserve média + légende ; utile ici
+            await bot.copy_message(chat_id=int(vip_user_id), from_chat_id=m.chat.id, message_id=m.message_id)
 
-        # Confirmer dans le topic
+        # Optionnel : notifier dans le topic que le message a été envoyé (silencieux si erreur)
         try:
             await bot.send_message(
                 chat_id=STAFF_GROUP_ID,
@@ -1432,7 +1446,7 @@ async def handle_staff_reply_to_vip(m: types.Message):
         except Exception:
             pass
 
-        # Stop propagation pour éviter tout autre handler (essentiel)
+        # Empêche tout autre handler de traiter ce message (très important)
         raise CancelHandler()
 
     except TelegramAPIError as e:
@@ -1449,6 +1463,7 @@ async def handle_staff_reply_to_vip(m: types.Message):
         except Exception:
             pass
         raise CancelHandler()
+
 
 
 
