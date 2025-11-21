@@ -1278,12 +1278,15 @@ async def annuler_envoi_groupé(call: types.CallbackQuery):
     pending_mass_message.pop(ADMIN_ID, None)
     await call.message.edit_text("❌ Envoi annulé.")
 
-# --- Handler staff -> client (multi-chatter, plusieurs clients par admin autorisé) ---
+# Remplace l'ancien handler staff->client par celui-ci (bot_webhook.py)
+from aiogram.dispatcher.handler import CancelHandler
 from aiogram.utils.exceptions import TelegramAPIError, MessageNotModified
+from aiogram import types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# importe les utilitaires depuis vip_topics
 from vip_topics import update_vip_info, save_vip_topics, get_user_id_by_topic_id, _user_topics
-from core import is_authorized_admin, ADMIN_ID  # ADMIN_ID si on veut autoriser override via owner
+from core import is_authorized_admin, ADMIN_ID, AUTHORIZED_ADMIN_IDS
+from core import bot, STAFF_GROUP_ID  # adapte si STAFF_GROUP_ID n'est pas défini dans core
 
 @dp.message_handler(
     lambda m: m.chat.id == STAFF_GROUP_ID and getattr(m, "message_thread_id", None) is not None,
@@ -1298,36 +1301,64 @@ async def handle_staff_reply_to_vip(m: types.Message):
     # 1) Vérifier que c'est un admin autorisé
     if not is_authorized_admin(admin_id):
         print(f"[STAFF_REPLY] user {admin_id} n'est pas un admin autorisé — ignored.")
-        # Empêche la propagation pour éviter autres handlers
         raise CancelHandler()
 
-    # 2) Quel VIP correspond à ce topic ?
+    # 2) Récupérer le vip_user_id via la fonction dédiée
     vip_user_id = get_user_id_by_topic_id(topic_id)
+
+    # Sécurité supplémentaire : si la fonction ne renvoie rien correct,
+    # chercher par parcours direct pour éviter erreurs de mapping.
     if not vip_user_id:
-        print(f"[STAFF_REPLY] Aucun VIP lié à topic {topic_id} — ignore.")
+        # tentative de fallback : parcourir _user_topics
+        for uid, info in _user_topics.items():
+            try:
+                if int(info.get("topic_id") or 0) == int(topic_id):
+                    vip_user_id = uid
+                    print(f"[STAFF_REPLY] Fallback trouvé vip_user_id={vip_user_id} via scan _user_topics")
+                    break
+            except Exception:
+                continue
+
+    # Si toujours rien -> on stoppe et loggue
+    if not vip_user_id:
+        print(f"[STAFF_REPLY] Aucun VIP lié à topic {topic_id} (après fallback). On ignore.")
         raise CancelHandler()
 
-    # 3) Récupérer les infos VIP
+    try:
+        vip_user_id = int(vip_user_id)
+    except Exception:
+        print(f"[STAFF_REPLY] vip_user_id non convertible en int: {vip_user_id}")
+        raise CancelHandler()
+
+    # 3) Défense : s'assurer qu'on n'envoie pas vers un admin par erreur
+    if vip_user_id in AUTHORIZED_ADMIN_IDS or vip_user_id == ADMIN_ID:
+        # ça veut dire que la mapping est corrompue (topic -> admin) — on log et on refuse d'envoyer
+        print(f"[STAFF_REPLY][ERROR] Le vip_user_id trouvé ({vip_user_id}) est un admin. Abandon en sécurité.")
+        # DEBUG INFO : afficher le _user_topics[vip_user_id] si existant
+        print(f"[STAFF_REPLY][DEBUG] _user_topics snippet for this vip_user_id: {_user_topics.get(vip_user_id)}")
+        # Ne pas forward pour éviter d'envoyer à un admin par erreur
+        try:
+            await m.reply("⚠️ Erreur interne : mapping topic->client incorrect. L'envoi a été interrompu.", reply=False)
+        except Exception:
+            pass
+        raise CancelHandler()
+
+    # 4) Auto-assign si nécessaire (on laisse la logique que tu as)
     info = _user_topics.get(vip_user_id, {})
     assigned_admin = info.get("admin_id")
-
-    # Normaliser assigned_admin en int si possible
     try:
         assigned_admin_int = int(assigned_admin) if assigned_admin is not None else None
     except Exception:
         assigned_admin_int = None
 
-    # 4) Si pas d'admin assigné -> auto-assign à celui qui écrit
     if assigned_admin_int is None:
         admin_name = m.from_user.username or m.from_user.first_name or str(admin_id)
         info = update_vip_info(vip_user_id, admin_id=admin_id, admin_name=admin_name)
-        # update_vip_info sauvegarde déjà JSON si ta version le fait (sinon on appelle explicitement)
         try:
             save_vip_topics()
         except Exception:
             pass
 
-        # Mettre à jour le panneau si on a le panel_message_id
         panel_msg_id = info.get("panel_message_id")
         panel_text = (
             "🧐 PANEL DE CONTRÔLE VIP\n\n"
@@ -1347,49 +1378,26 @@ async def handle_staff_reply_to_vip(m: types.Message):
             except Exception as e:
                 print(f"[STAFF_REPLY] erreur edit panel after auto-assign: {e}")
 
-        # Message informatif dans le topic
         try:
-            await bot.send_message(chat_id=STAFF_GROUP_ID, message_thread_id=topic_id,
-                                   text=f"✅ @{m.from_user.username or m.from_user.first_name} prend en charge ce client.")
+            await bot.send_message(chat_id=STAFF_GROUP_ID, message_thread_id=topic_id, text=f"✅ @{m.from_user.username or m.from_user.first_name} prend en charge ce client.")
         except Exception:
             pass
 
         assigned_admin_int = admin_id
 
-    else:
-        # 5) Si déjà assigné à un autre admin différent => on n'autorise pas la prise (protection contre vol)
-        if int(assigned_admin_int) != admin_id:
-            # Exception: si tu veux autoriser override par le propriétaire ADMIN_ID, décommente ci-dessous
-            # if admin_id == int(ADMIN_ID):
-            #     # Owner can override : réassigner au owner
-            #     info = update_vip_info(vip_user_id, admin_id=admin_id, admin_name=m.from_user.username or str(admin_id))
-            #     save_vip_topics()
-            #     assigned_admin_int = admin_id
-            # else:
-            try:
-                await m.reply("❌ Ce client est déjà pris en charge par un autre admin. Si tu veux le reprendre, contacte l'admin en charge ou demande la main.", reply=False)
-            except Exception:
-                pass
-            # Empêche la propagation et n'envoie rien au client
-            raise CancelHandler()
-        # sinon si c'est le même admin, on continue — un admin peut gérer plusieurs clients (aucune limite)
-
-    # 6) À présent, l'admin envoie le message au client (texte / média)
+    # 5) Final : transmettre le message au client (texte / média)
     try:
         if m.content_type == types.ContentType.TEXT:
-            await bot.send_message(chat_id=int(vip_user_id), text=m.text)
+            await bot.send_message(chat_id=vip_user_id, text=m.text)
         else:
-            # copy_message conserve média et légende
-            await bot.copy_message(chat_id=int(vip_user_id), from_chat_id=m.chat.id, message_id=m.message_id)
+            await bot.copy_message(chat_id=vip_user_id, from_chat_id=m.chat.id, message_id=m.message_id)
 
         # confirmation dans le topic
         try:
-            await bot.send_message(chat_id=STAFF_GROUP_ID, message_thread_id=topic_id,
-                                   text=f"✅ Message envoyé au client par @{m.from_user.username or m.from_user.first_name}.")
+            await bot.send_message(chat_id=STAFF_GROUP_ID, message_thread_id=topic_id, text=f"✅ Message envoyé au client par @{m.from_user.username or m.from_user.first_name}.")
         except Exception:
             pass
 
-        # stop propagation
         raise CancelHandler()
 
     except TelegramAPIError as e:
@@ -1406,6 +1414,7 @@ async def handle_staff_reply_to_vip(m: types.Message):
         except Exception:
             pass
         raise CancelHandler()
+
 
 
 
